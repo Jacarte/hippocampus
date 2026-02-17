@@ -15,7 +15,7 @@ echo "📊 Creating data directories..."
 mkdir -p data/postgres data/mem0
 
 echo "🐳 Starting Docker services..."
-docker-compose up -d
+docker-compose up -d --build
 
 echo ""
 echo "✅ Services started!"
