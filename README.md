@@ -373,12 +373,3 @@ Based on original source: https://code.m3ta.dev/m3tam3re/nixpkgs/src/branch/mast
 
 For issues with mem0 library itself, see: https://github.com/mem0ai/mem0
 
-## Changelog
-
-### Version 1.0.0
-- Initial release with core memory management features
-- Support for OpenAI LLM and embedding providers
-- PostgreSQL/pgvector vector store support
-- RESTful API with comprehensive endpoints
-- Health checks and monitoring
-- Memory history tracking
