@@ -1,2 +1,6 @@
 mem
 .git
+mem0_history/
+postgress_data/
+.env
+data/

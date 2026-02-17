@@ -1,0 +1,112 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mem0-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_INITDB_ARGS: "-c shared_buffers=256MB -c max_connections=200"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - mem0-network
+    restart: unless-stopped
+    labels:
+      com.example.description: "PostgreSQL database with pgvector for mem0"
+    security_opt:
+      - no-new-privileges:true
+
+  mem0-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    container_name: mem0-server
+    image: mem0-server:latest
+    ports:
+      - "${MEM0_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      # Vector Store Configuration
+      MEM0_VECTOR_PROVIDER: ${MEM0_VECTOR_PROVIDER:-pgvector}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_COLLECTION: ${POSTGRES_COLLECTION:-mem0_memories}
+
+      # LLM Configuration
+      MEM0_LLM_PROVIDER: ${MEM0_LLM_PROVIDER:-openai}
+      MEM0_LLM_MODEL: ${MEM0_LLM_MODEL:-gpt-4}
+      MEM0_LLM_TEMPERATURE: ${MEM0_LLM_TEMPERATURE:-0.7}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      MEM0_LLM_EXTRA_CONFIG: ${MEM0_LLM_EXTRA_CONFIG:-}
+
+      # Embedder Configuration
+      MEM0_EMBEDDER_PROVIDER: ${MEM0_EMBEDDER_PROVIDER:-openai}
+      MEM0_EMBEDDER_MODEL: ${MEM0_EMBEDDER_MODEL:-text-embedding-3-small}
+
+      # Server Configuration
+      MEM0_HOST: 0.0.0.0
+      MEM0_PORT: 8000
+      MEM0_WORKERS: ${MEM0_WORKERS:-4}
+      MEM0_LOG_LEVEL: ${MEM0_LOG_LEVEL:-info}
+      MEM0_HISTORY_DB_PATH: /var/lib/mem0/history.db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .env:/app/.env:ro
+      - mem0_history:/var/lib/mem0
+    networks:
+      - mem0-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    labels:
+      com.example.description: "Mem0 REST API server"
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_PATH:-./data}/postgres
+  mem0_history:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_PATH:-./data}/mem0
+
+networks:
+  mem0-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
