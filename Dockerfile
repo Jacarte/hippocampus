@@ -33,6 +33,9 @@ COPY --from=builder /root/.local /root/.local
 RUN pip install --no-cache-dir psycopg[pool]
 
 COPY server.py .
+COPY api_models.py .
+COPY tests ./tests
+COPY services ./services
 
 RUN mkdir -p /var/lib/mem0 && \
   chmod 755 /var/lib/mem0
