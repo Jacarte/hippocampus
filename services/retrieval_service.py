@@ -15,6 +15,8 @@ from .tracing import (
 
 
 class RetrievalService:
+    _RETRIEVE_CONTROL_FILTER_KEYS: frozenset[str] = frozenset({"include_cold_context"})
+
     def __init__(
         self,
         *,
@@ -155,12 +157,13 @@ class RetrievalService:
             run_id=run_id,
             agent_id=agent_id,
         )
-        combined_filters = self._combine_filters(filters, requested_scopes)
+        retrieval_filters = self._strip_retrieve_control_filters(filters)
+        combined_filters = self._combine_filters(retrieval_filters, requested_scopes)
         semantic_params = self._search_params(
             user_id=user_id,
             run_id=run_id,
             agent_id=agent_id,
-            filters=filters,
+            filters=retrieval_filters,
         )
 
         with stage_timer() as total_elapsed_ms:
@@ -712,6 +715,17 @@ class RetrievalService:
         if "scope" not in combined_filters:
             combined_filters["scope"] = list(scopes) if len(scopes) > 1 else scopes[0]
         return combined_filters or None
+
+    def _strip_retrieve_control_filters(
+        self,
+        filters: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        sanitized_filters = {
+            key: value
+            for key, value in (filters or {}).items()
+            if key not in self._RETRIEVE_CONTROL_FILTER_KEYS
+        }
+        return sanitized_filters or None
 
     def _semantic_score(self, candidate: dict[str, Any]) -> float | None:
         raw_score = candidate.get("score")
