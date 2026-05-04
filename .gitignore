@@ -5,3 +5,4 @@ postgress_data/
 .env
 data/
 mem/
+__pycache__/
