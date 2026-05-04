@@ -1145,6 +1145,82 @@ def test_retrieve_degrades_to_lexical_results_when_semantic_fails(
     }
 
 
+def test_retrieve_ignores_include_cold_context_control_flag_for_filtering(
+    monkeypatch: MonkeyPatch,
+):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    class FakeMemory:
+        def __init__(self, config: dict[str, Any]) -> None:
+            self.config = config
+            self.last_search_params: dict[str, Any] | None = None
+
+        def get_all(self, **_: Any) -> list[dict[str, Any]]:
+            return [
+                {
+                    "id": "memory-1",
+                    "memory": "Use POST /retrieve as the canonical backend retrieval endpoint.",
+                    "metadata": {"source": "chat", "scope": "project"},
+                }
+            ]
+
+        def search(self, **params: Any) -> dict[str, Any]:
+            self.last_search_params = params
+            return {
+                "results": [
+                    {
+                        "id": "memory-1",
+                        "memory": "Use POST /retrieve as the canonical backend retrieval endpoint.",
+                        "metadata": {"source": "chat", "scope": "project"},
+                        "score": 0.88,
+                    }
+                ]
+            }
+
+    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+
+    config: dict[str, Any] = {
+        "version": "v1.1",
+        "vector_store": {"provider": "pgvector", "config": {}},
+        "llm": {
+            "provider": "openai",
+            "config": {"model": "gpt-5", "api_key": "test-key"},
+        },
+        "embedder": {"provider": "openai", "config": {"api_key": "test-key"}},
+        "history_db_path": "/tmp/history.db",
+    }
+
+    with TestClient(app) as client:
+        assert client.post("/configure", json=config).status_code == 200
+        retrieve_response = client.post(
+            "/retrieve",
+            json={
+                "query": "canonical retrieve endpoint",
+                "scopes": ["project"],
+                "user_id": "user-1",
+                "filters": {
+                    "source": "chat",
+                    "include_cold_context": False,
+                },
+            },
+        )
+
+    assert retrieve_response.status_code == 200
+    payload = retrieve_response.json()
+    assert [result["id"] for result in payload["results"]] == ["memory-1"]
+
+    fake_memory = app.state.memory
+    assert isinstance(fake_memory, FakeMemory)
+    assert fake_memory.last_search_params == {
+        "query": "canonical retrieve endpoint",
+        "user_id": "user-1",
+        "filters": {"source": "chat"},
+    }
+
+
 def test_retrieve_returns_fused_results_when_rerank_fails(monkeypatch: MonkeyPatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
