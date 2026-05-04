@@ -6,288 +6,240 @@ A FastAPI-based REST server for mem0 memory operations.
 Original source: https://code.m3ta.dev/m3tam3re/nixpkgs/src/branch/master/pkgs/mem0/server.py
 """
 
-import logging
-import os
-import sys
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException
+import logging
+import time
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel, Field
 
 from mem0 import Memory
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+from api_models import MemoryCreate, RetrieveRequest, SearchRequest
+from services.anchor_service import AnchorService
+from services.memory_service import MemoryService
+from services.retrieval_service import RetrievalService
+from services.runtime import (
+    MemoryFactory,
+    get_memory_instance,
+    get_runtime_options,
+    initialize_memory,
+)
+from services.tracing import (
+    bind_request_id,
+    reset_request_id,
+    resolve_request_id,
+    trace_backend_error,
+    trace_backend_request_complete,
+    trace_backend_request_start,
+)
 
-
-# Configuration from environment variables
-def get_config_from_env() -> Dict[str, Any]:
-    """Build mem0 configuration from environment variables."""
-    config = {"version": "v1.1"}
-
-    # Vector store configuration
-    vector_provider = os.environ.get("MEM0_VECTOR_PROVIDER", "pgvector")
-    config["vector_store"] = {"provider": vector_provider}
-
-    if vector_provider == "pgvector":
-        config["vector_store"]["config"] = {
-            "host": os.environ.get("POSTGRES_HOST", "localhost"),
-            "port": int(os.environ.get("POSTGRES_PORT", "5432")),
-            "dbname": os.environ.get("POSTGRES_DB", "postgres"),
-            "user": os.environ.get("POSTGRES_USER", "postgres"),
-            "password": os.environ.get("POSTGRES_PASSWORD", "postgres"),
-            "collection_name": os.environ.get("POSTGRES_COLLECTION", "mem0_memories"),
-        }
-
-
-    # LLM configuration
-    llm_provider = os.environ.get("MEM0_LLM_PROVIDER", "openai")
-    config["llm"] = {
-        "provider": llm_provider,
-        "config": {
-            "model": os.environ.get("MEM0_LLM_MODEL", "gpt-5"),
-        }
-    }
-
-    # Temperature: only include if set (null means use provider default)
-    temperature = os.environ.get("MEM0_LLM_TEMPERATURE")
-    if temperature is not None:
-        config["llm"]["config"]["temperature"] = float(temperature)
-
-    # Extra config: merge JSON env var if provided
-    extra_config_json = os.environ.get("MEM0_LLM_EXTRA_CONFIG")
-    if extra_config_json:
-        import json
-        try:
-            extra_config = json.loads(extra_config_json)
-            config["llm"]["config"].update(extra_config)
-        except json.JSONDecodeError:
-            logging.warning(f"Failed to parse MEM0_LLM_EXTRA_CONFIG: {extra_config_json}")
-
-    # Add API key if available
-    if llm_provider == "openai":
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if api_key:
-            config["llm"]["config"]["api_key"] = api_key
-
-    # Embedder configuration
-    embedder_provider = os.environ.get("MEM0_EMBEDDER_PROVIDER", "openai")
-    config["embedder"] = {
-        "provider": embedder_provider,
-    }
-
-    # Embedder model: only include if provider is set
-    if embedder_provider:
-        embedder_config = {}
-        embedder_model = os.environ.get("MEM0_EMBEDDER_MODEL")
-        if embedder_model:
-            embedder_config["model"] = embedder_model
-        config["embedder"]["config"] = embedder_config
-
-    if embedder_provider == "openai":
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if api_key:
-            config["embedder"]["config"]["api_key"] = api_key
-
-    # History DB path
-    history_db_path = os.environ.get("MEM0_HISTORY_DB_PATH", "/var/lib/mem0/history.db")
-    config["history_db_path"] = history_db_path
-
-    return config
-
-
-# Initialize Memory instance
-try:
-    config = get_config_from_env()
-    logging.info(f"Initializing mem0 with config: {config}")
-
-    # Validate API key is set for OpenAI provider
-    if config.get("llm", {}).get("provider") == "openai":
-        if not config.get("llm", {}).get("config", {}).get("api_key"):
-            logging.error("OPENAI_API_KEY environment variable is required but not set.")
-            logging.error("Please set OPENAI_API_KEY environment variable or configure apiKeyFile in NixOS module.")
-            sys.exit(1)
-
-    MEMORY_INSTANCE = Memory.from_config(config)
-    logging.info("Memory instance initialized successfully")
-except Exception as e:
-    logging.error(f"Failed to initialize Memory: {e}")
-    logging.error("Please check your configuration and ensure all required services are running.")
-    sys.exit(1)
-
-
-app = FastAPI(
-    title="Mem0 REST API",
-    description="A REST API for managing and searching memories for your AI Agents and Apps.",
-    version="1.0.0",
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
 
-class Message(BaseModel):
-    role: str = Field(..., description="Role of the message (user or assistant).")
-    content: str = Field(..., description="Message content.")
+def create_app(
+    *, memory_factory: MemoryFactory = Memory.from_config, startup_enabled: bool = True
+) -> FastAPI:
+    app = FastAPI(
+        title="Mem0 REST API",
+        description="A REST API for managing and searching memories for your AI Agents and Apps.",
+        version="1.0.0",
+    )
+    app.state.memory_factory = memory_factory
+    app.state.memory = None
+    app.state.memory_config = None
+    app.state.memory_service = MemoryService(
+        retrieval_service=RetrievalService(),
+        anchor_service=AnchorService(),
+    )
 
+    @app.middleware("http")
+    async def correlation_id_middleware(request: Request, call_next: Any) -> Any:
+        request_id = resolve_request_id(request.headers)
+        request.state.request_id = request_id
+        started_at = time.perf_counter()
+        token = bind_request_id(request_id)
+        trace_backend_request_start(request.method, request.url.path)
+        try:
+            response = await call_next(request)
+        except Exception:
+            latency_ms = (time.perf_counter() - started_at) * 1000
+            trace_backend_request_complete(
+                request.method,
+                request.url.path,
+                status_code=500,
+                latency_ms=latency_ms,
+            )
+            raise
+        else:
+            response.headers["X-Correlation-ID"] = request_id
+            trace_backend_request_complete(
+                request.method,
+                request.url.path,
+                status_code=response.status_code,
+                latency_ms=(time.perf_counter() - started_at) * 1000,
+            )
+            return response
+        finally:
+            reset_request_id(token)
 
-class MemoryCreate(BaseModel):
-    messages: List[Message] = Field(..., description="List of messages to store.")
-    user_id: Optional[str] = None
-    agent_id: Optional[str] = None
-    run_id: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    if startup_enabled:
 
+        @app.on_event("startup")
+        def startup_initialize_memory() -> None:
+            initialize_memory(app)
 
-class SearchRequest(BaseModel):
-    query: str = Field(..., description="Search query.")
-    user_id: Optional[str] = None
-    run_id: Optional[str] = None
-    agent_id: Optional[str] = None
-    filters: Optional[Dict[str, Any]] = None
+    @app.get("/", summary="Redirect to documentation", include_in_schema=False)
+    def home() -> RedirectResponse:
+        return RedirectResponse(url="/docs")
 
+    @app.get("/health", summary="Health check")
+    def health() -> dict[str, str]:
+        return {"status": "healthy", "service": "mem0-api"}
 
-@app.get("/", summary="Redirect to documentation", include_in_schema=False)
-def home():
-    """Redirect to the OpenAPI documentation."""
-    return RedirectResponse(url="/docs")
+    @app.post("/configure", summary="Configure Mem0")
+    def set_config(config: dict[str, Any], request: Request) -> dict[str, str]:
+        return _execute_service_call(
+            "set_config",
+            lambda: request.app.state.memory_service.configure(request.app, config),
+        )
 
-
-@app.get("/health", summary="Health check")
-def health():
-    """Check if the server is running."""
-    return {"status": "healthy", "service": "mem0-api"}
-
-
-@app.post("/configure", summary="Configure Mem0")
-def set_config(config: Dict[str, Any]):
-    """Set memory configuration."""
-    global MEMORY_INSTANCE
-    MEMORY_INSTANCE = Memory.from_config(config)
-    return {"message": "Configuration set successfully"}
-
-
-@app.post("/memories", summary="Create memories")
-def add_memory(memory_create: MemoryCreate):
-    """Store new memories."""
-    if not any([memory_create.user_id, memory_create.agent_id, memory_create.run_id]):
-        raise HTTPException(status_code=400, detail="At least one identifier (user_id, agent_id, run_id) is required.")
-
-    params = {k: v for k, v in memory_create.model_dump().items() if v is not None and k != "messages"}
-    try:
-        response = MEMORY_INSTANCE.add(messages=[m.model_dump() for m in memory_create.messages], **params)
+    @app.post("/memories", summary="Create memories")
+    def add_memory(memory_create: MemoryCreate, request: Request) -> JSONResponse:
+        memory_instance = get_memory_instance(request)
+        response = _execute_service_call(
+            "add_memory",
+            lambda: request.app.state.memory_service.add(
+                memory_instance, memory_create
+            ),
+        )
         return JSONResponse(content=response)
-    except Exception as e:
-        logging.exception("Error in add_memory:")
-        raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/memories", summary="Get memories")
+    def get_all_memories(
+        request: Request,
+        user_id: str | None = None,
+        run_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> Any:
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "get_all_memories",
+            lambda: request.app.state.memory_service.get_all(
+                memory_instance,
+                user_id=user_id,
+                run_id=run_id,
+                agent_id=agent_id,
+            ),
+        )
+
+    @app.get("/memories/{memory_id}", summary="Get a memory")
+    def get_memory(memory_id: str, request: Request) -> Any:
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "get_memory",
+            lambda: request.app.state.memory_service.get(memory_instance, memory_id),
+        )
+
+    @app.post("/search", summary="Search memories")
+    def search_memories(search_req: SearchRequest, request: Request) -> Any:
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "search_memories",
+            lambda: request.app.state.memory_service.search(
+                memory_instance, search_req
+            ),
+        )
+
+    @app.post("/retrieve", summary="Retrieve memories")
+    def retrieve_memories(retrieve_req: RetrieveRequest, request: Request) -> Any:
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "retrieve_memories",
+            lambda: request.app.state.memory_service.retrieve(
+                memory_instance, retrieve_req
+            ),
+        )
+
+    @app.put("/memories/{memory_id}", summary="Update a memory")
+    def update_memory(
+        memory_id: str, updated_memory: dict[str, Any], request: Request
+    ) -> Any:
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "update_memory",
+            lambda: request.app.state.memory_service.update(
+                memory_instance, memory_id, updated_memory
+            ),
+        )
+
+    @app.get("/memories/{memory_id}/history", summary="Get memory history")
+    def memory_history(memory_id: str, request: Request) -> Any:
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "memory_history",
+            lambda: request.app.state.memory_service.history(
+                memory_instance, memory_id
+            ),
+        )
+
+    @app.delete("/memories/{memory_id}", summary="Delete a memory")
+    def delete_memory(memory_id: str, request: Request) -> dict[str, str]:
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "delete_memory",
+            lambda: request.app.state.memory_service.delete(memory_instance, memory_id),
+        )
+
+    @app.delete("/memories", summary="Delete all memories")
+    def delete_all_memories(
+        request: Request,
+        user_id: str | None = None,
+        run_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> dict[str, str]:
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "delete_all_memories",
+            lambda: request.app.state.memory_service.delete_all(
+                memory_instance,
+                user_id=user_id,
+                run_id=run_id,
+                agent_id=agent_id,
+            ),
+        )
+
+    @app.post("/reset", summary="Reset all memories")
+    def reset_memory(request: Request) -> dict[str, str]:
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "reset_memory",
+            lambda: request.app.state.memory_service.reset(memory_instance),
+        )
+
+    return app
 
 
-@app.get("/memories", summary="Get memories")
-def get_all_memories(
-    user_id: Optional[str] = None,
-    run_id: Optional[str] = None,
-    agent_id: Optional[str] = None,
-):
-    """Retrieve stored memories."""
-    if not any([user_id, run_id, agent_id]):
-        raise HTTPException(status_code=400, detail="At least one identifier is required.")
+def _execute_service_call(operation: str, handler: Any) -> Any:
     try:
-        params = {
-            k: v for k, v in {"user_id": user_id, "run_id": run_id, "agent_id": agent_id}.items() if v is not None
-        }
-        return MEMORY_INSTANCE.get_all(**params)
-    except Exception as e:
-        logging.exception("Error in get_all_memories:")
-        raise HTTPException(status_code=500, detail=str(e))
+        return handler()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        trace_backend_error(operation, exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@app.get("/memories/{memory_id}", summary="Get a memory")
-def get_memory(memory_id: str):
-    """Retrieve a specific memory by ID."""
-    try:
-        return MEMORY_INSTANCE.get(memory_id)
-    except Exception as e:
-        logging.exception("Error in get_memory:")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/search", summary="Search memories")
-def search_memories(search_req: SearchRequest):
-    """Search for memories based on a query."""
-    try:
-        params = {k: v for k, v in search_req.model_dump().items() if v is not None and k != "query"}
-        return MEMORY_INSTANCE.search(query=search_req.query, **params)
-    except Exception as e:
-        logging.exception("Error in search_memories:")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.put("/memories/{memory_id}", summary="Update a memory")
-def update_memory(memory_id: str, updated_memory: Dict[str, Any]):
-    """Update an existing memory with new content."""
-    try:
-        return MEMORY_INSTANCE.update(memory_id=memory_id, data=updated_memory)
-    except Exception as e:
-        logging.exception("Error in update_memory:")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/memories/{memory_id}/history", summary="Get memory history")
-def memory_history(memory_id: str):
-    """Retrieve memory history."""
-    try:
-        return MEMORY_INSTANCE.history(memory_id=memory_id)
-    except Exception as e:
-        logging.exception("Error in memory_history:")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.delete("/memories/{memory_id}", summary="Delete a memory")
-def delete_memory(memory_id: str):
-    """Delete a specific memory by ID."""
-    try:
-        MEMORY_INSTANCE.delete(memory_id=memory_id)
-        return {"message": "Memory deleted successfully"}
-    except Exception as e:
-        logging.exception("Error in delete_memory:")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.delete("/memories", summary="Delete all memories")
-def delete_all_memories(
-    user_id: Optional[str] = None,
-    run_id: Optional[str] = None,
-    agent_id: Optional[str] = None,
-):
-    """Delete all memories for a given identifier."""
-    if not any([user_id, run_id, agent_id]):
-        raise HTTPException(status_code=400, detail="At least one identifier is required.")
-    try:
-        params = {
-            k: v for k, v in {"user_id": user_id, "run_id": run_id, "agent_id": agent_id}.items() if v is not None
-        }
-        MEMORY_INSTANCE.delete_all(**params)
-        return {"message": "All relevant memories deleted"}
-    except Exception as e:
-        logging.exception("Error in delete_all_memories:")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/reset", summary="Reset all memories")
-def reset_memory():
-    """Completely reset stored memories."""
-    try:
-        MEMORY_INSTANCE.reset()
-        return {"message": "All memories reset"}
-    except Exception as e:
-        logging.exception("Error in reset_memory:")
-        raise HTTPException(status_code=500, detail=str(e))
+app = create_app()
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    host = os.environ.get("MEM0_HOST", "127.0.0.1")
-    port = int(os.environ.get("MEM0_PORT", "8000"))
-    workers = int(os.environ.get("MEM0_WORKERS", "1"))
-    log_level = os.environ.get("MEM0_LOG_LEVEL", "info")
-
-    uvicorn.run(app, host=host, port=port, workers=workers, log_level=log_level)
-
+    uvicorn.run(app, **get_runtime_options())
