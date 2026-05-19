@@ -169,7 +169,17 @@ class FileIngestRequest(BaseModel):
         ...,
         description=(
             "Logical root label for this batch (e.g. the project path on the client). "
-            "Used as the corpus namespace — does not need to exist on the server."
+            "Used as the corpus namespace when *project_id* is not provided. "
+            "Does not need to exist on the server."
+        ),
+    )
+    project_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional stable project identifier (e.g. 'my-app', 'backend-service'). "
+            "When provided, used as the corpus namespace instead of *root*, so that "
+            "chunks from the same project indexed from different machines or paths "
+            "are kept together and do not overlap with other projects."
         ),
     )
     files: list[FileContent] = Field(

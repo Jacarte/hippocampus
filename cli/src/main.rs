@@ -38,6 +38,10 @@ pub enum Commands {
         /// Directory to index (default: current directory)
         #[arg(default_value = ".")]
         path: String,
+        /// Stable project identifier used as corpus namespace (e.g. 'my-app').
+        /// When omitted, the resolved absolute path is used as the namespace.
+        #[arg(long)]
+        project_id: Option<String>,
         /// Generate LLM summaries for indexed chunks
         #[arg(long)]
         generate_summaries: bool,
@@ -104,9 +108,9 @@ async fn main() -> anyhow::Result<()> {
                 raw,
             )?;
         }
-        Commands::Sync { path, url, generate_summaries } => {
+        Commands::Sync { path, url, generate_summaries, project_id } => {
             let base = url.as_deref().map(|u| resolve_base_url(u)).unwrap_or_else(|| Config::from_env().base_url);
-            commands::sync::run_sync(&base, &path, generate_summaries)?;
+            commands::sync::run_sync(&base, &path, generate_summaries, project_id.as_deref())?;
         }
         Commands::Watch { path, stop, url } => {
             let base = url.as_deref().map(|u| resolve_base_url(u)).unwrap_or_else(|| Config::from_env().base_url);

@@ -159,6 +159,7 @@ class IndexingService:
         root: str,
         files: list[dict[str, str]],
         generate_summaries: bool = False,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         """Ingest pre-read file contents into the corpus.
 
@@ -174,12 +175,17 @@ class IndexingService:
             generate_summaries: When ``True`` and a memory instance is available,
                 generate LLM chunk summaries.  Silently skipped when memory is
                 not configured.
+            project_id: Optional stable project identifier. When provided, used
+                as the corpus namespace instead of *root*, ensuring that chunks
+                from the same project indexed from different machines or paths
+                do not overlap with other projects.
 
         Returns:
             Dict with ``root``, ``files_indexed``, ``chunks_indexed``,
             ``ingested_at``, and ``errors`` keys.
         """
-        self._manifest.register_root(root)
+        namespace = project_id if project_id else root
+        self._manifest.register_root(namespace)
 
         files_indexed = 0
         chunks_indexed = 0
@@ -215,13 +221,13 @@ class IndexingService:
                                 exc,
                             )
 
-                self._corpus.upsert_chunks(root, file_path, chunks)
+                self._corpus.upsert_chunks(namespace, file_path, chunks)
 
                 chunk_ids = [c.get("id", str(i)) for i, c in enumerate(chunks)]
                 fingerprint = hashlib.sha256(
                     content.encode("utf-8", errors="replace")
                 ).hexdigest()
-                self._manifest.update_file(root, file_path, fingerprint, chunk_ids)
+                self._manifest.update_file(namespace, file_path, fingerprint, chunk_ids)
 
                 files_indexed += 1
                 chunks_indexed += len(chunks)

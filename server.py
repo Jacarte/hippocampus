@@ -286,6 +286,7 @@ def create_app(
                 root=ingest_req.root,
                 files=[f.model_dump() for f in ingest_req.files],
                 generate_summaries=ingest_req.generate_summaries,
+                project_id=ingest_req.project_id,
             ),
         )
 
