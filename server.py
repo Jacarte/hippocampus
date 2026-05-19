@@ -249,6 +249,10 @@ def create_app(
     @app.post("/query", summary="Unified cross-corpus query")
     def unified_query(query_req: UnifiedQueryRequest, request: Request) -> Any:
         chunk_memory_enabled = is_chunk_memory_enabled()
+        try:
+            memory_instance = get_memory_instance(request)
+        except Exception:
+            memory_instance = None
         return _execute_service_call(
             "unified_query",
             lambda: request.app.state.query_service.query(
@@ -259,6 +263,7 @@ def create_app(
                 language_filter=query_req.language_filter,
                 scope_filter=query_req.scope_filter,
                 chunk_memory_enabled=chunk_memory_enabled,
+                memory_instance=memory_instance,
             ),
         )
 

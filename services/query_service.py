@@ -33,6 +33,7 @@ class QueryService:
         user_id: str | None = None,
         chunk_memory_enabled: bool = False,
         query_embedding: list[float] | None = None,
+        memory_instance: Any | None = None,
     ) -> dict[str, Any]:
         """Execute a fused cross-corpus query.
 
@@ -93,7 +94,7 @@ class QueryService:
             corpora_queried.append("memory_store")
             try:
                 all_hits.extend(
-                    self._query_memory_store(query_text, limit=limit, user_id=user_id)
+                    self._query_memory_store(query_text, limit=limit, user_id=user_id, memory_instance=memory_instance)
                 )
             except Exception as exc:  # noqa: BLE001
                 degraded = True
@@ -163,12 +164,21 @@ class QueryService:
         *,
         limit: int,
         user_id: str | None,
+        memory_instance: Any | None,
     ) -> list[MemoryHit]:
+        """Query the memory store and return normalised MemoryHit objects.
+
+        Returns an empty list when *memory_instance* is ``None`` (memory not yet
+        initialised), instead of raising, so the file-corpus path is unaffected.
+        """
+        if memory_instance is None:
+            return []
+
         kwargs: dict[str, Any] = {"query": query_text, "limit": limit}
         if user_id is not None:
             kwargs["user_id"] = user_id
 
-        raw: list[dict[str, Any]] = self._retrieval.search(**kwargs)
+        raw: list[dict[str, Any]] = self._retrieval.search(memory_instance, **kwargs)
 
         return [
             MemoryHit.model_validate(
