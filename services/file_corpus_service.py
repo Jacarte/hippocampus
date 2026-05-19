@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import uuid
 from typing import Any
 
@@ -129,25 +130,39 @@ class FileCorpusService:
         filters: dict[str, Any] | None,
         limit: int,
     ) -> list[dict[str, Any]]:
+        """Return chunks containing *query_text*, ranked by a simple TF score.
+
+        Scoring: (token_frequency_sum + phrase_bonus) / word_count.
+        The phrase bonus equals ``len(query_tokens)`` when the full query string
+        appears verbatim in the content, rewarding exact matches over scattered
+        token hits.  Results are sorted descending by score before the *limit*
+        cap is applied so the highest-scoring chunks are always returned.
+        """
         results: list[dict[str, Any]] = []
         lowered_query = query_text.lower()
+        query_tokens = [t for t in re.findall(r"[a-z0-9_-]+", lowered_query) if t]
 
         for chunk in self._chunks.values():
             content: str = chunk.get("content") or ""
-            if lowered_query and lowered_query not in content.lower():
+            lowered_content = content.lower()
+            if lowered_query and lowered_query not in lowered_content:
                 continue
             if filters:
-                match = all(
+                if not all(
                     str(chunk.get(field)) == str(value)
                     for field, value in filters.items()
-                )
-                if not match:
+                ):
                     continue
-            results.append(dict(chunk))
-            if len(results) >= limit:
-                break
+            tf = sum(lowered_content.count(t) for t in query_tokens) if query_tokens else 0
+            phrase_bonus = len(query_tokens) if query_tokens and lowered_query in lowered_content else 0
+            word_count = max(len(lowered_content.split()), 1)
+            score = round((tf + phrase_bonus) / word_count, 6)
+            result = dict(chunk)
+            result["score"] = score
+            results.append(result)
 
-        return results
+        results.sort(key=lambda c: c.get("score", 0.0), reverse=True)
+        return results[:limit]
 
     def _merge_with_semantic(
         self,

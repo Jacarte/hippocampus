@@ -219,7 +219,7 @@ def test_degraded_query_file_corpus_raises_returns_memory_hits_and_degraded_flag
             raise RuntimeError("corpus unavailable")
 
     class StubRetrieval:
-        def search(self, **_: Any) -> list[dict[str, Any]]:
+        def search(self, memory_instance: Any, **_: Any) -> list[dict[str, Any]]:
             return [
                 {
                     "id": "mem-stub-1",
@@ -233,6 +233,7 @@ def test_degraded_query_file_corpus_raises_returns_memory_hits_and_degraded_flag
         corpus=BrokenCorpus(),
         retrieval_service=StubRetrieval(),
     )
+    app.state.memory = object()
 
     with TestClient(app) as client:
         resp = client.post(

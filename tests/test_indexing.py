@@ -27,7 +27,7 @@ class TestFileCorpusIsolation:
         assert results[0]["content"] == "def hello(): pass"
         assert results[0]["root"] == "/repo"
         assert results[0]["file_path"] == "src/main.py"
-        assert results[0]["score"] == 0.0
+        assert results[0]["score"] > 0.0
 
     def test_file_corpus_isolation(self):
         svc = FileCorpusService()
