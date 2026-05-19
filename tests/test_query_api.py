@@ -125,3 +125,136 @@ def test_query_degrades_gracefully_on_memory_error() -> None:
     assert any("memory_store" in r for r in result["degradation_reasons"])
     assert len(result["hits"]) == 2
     assert all(h["corpus"] == "file_corpus" for h in result["hits"])
+
+
+def _make_corpus_with_summaries() -> FileCorpusService:
+    corpus = FileCorpusService()
+    corpus.upsert_chunks(
+        root="/repo",
+        file_path="bar.py",
+        chunks=[
+            {
+                "language": "python",
+                "symbol_name": "fn_with_summary",
+                "symbol_kind": "function",
+                "line_start": 1,
+                "line_end": 5,
+                "content": "irrelevant content",
+                "summary_text": "This function does authentication",
+                "summary_embedding": [1.0, 0.0, 0.0],
+            },
+            {
+                "language": "python",
+                "symbol_name": "fn_no_summary",
+                "symbol_kind": "function",
+                "line_start": 10,
+                "line_end": 15,
+                "content": "irrelevant content",
+            },
+            {
+                "language": "python",
+                "symbol_name": "fn_with_low_score",
+                "symbol_kind": "function",
+                "line_start": 20,
+                "line_end": 25,
+                "content": "irrelevant content",
+                "summary_text": "This function does something unrelated",
+                "summary_embedding": [0.0, 1.0, 0.0],
+            },
+        ],
+    )
+    return corpus
+
+
+def test_chunk_memory_disabled_returns_lexical_only() -> None:
+    """With chunk_memory_enabled=False, results are identical to baseline lexical."""
+    corpus = FileCorpusService()
+    corpus.upsert_chunks(
+        root="/repo",
+        file_path="x.py",
+        chunks=[
+            {"content": "hello world", "line_start": 1, "line_end": 1},
+            {"content": "goodbye world", "line_start": 2, "line_end": 2},
+        ],
+    )
+    retrieval = FakeRetrieval([])
+    svc = QueryService(corpus=corpus, retrieval_service=retrieval)
+
+    result_without_flag = svc.query("hello", corpora=["file_corpus"])
+    result_flag_off = svc.query("hello", corpora=["file_corpus"], chunk_memory_enabled=False)
+
+    assert result_without_flag["hits"] == result_flag_off["hits"]
+    assert result_without_flag["total"] == result_flag_off["total"]
+
+
+def test_chunk_memory_enabled_includes_summary_matched_chunks() -> None:
+    """With chunk_memory_enabled=True, chunks matching via summary_embedding are included."""
+    corpus = _make_corpus_with_summaries()
+    retrieval = FakeRetrieval([])
+    svc = QueryService(corpus=corpus, retrieval_service=retrieval)
+
+    result = svc.query(
+        "irrelevant content",
+        corpora=["file_corpus"],
+        chunk_memory_enabled=True,
+        query_embedding=[1.0, 0.0, 0.0],
+    )
+
+    symbol_names = [h["symbol_name"] for h in result["hits"]]
+    assert "fn_with_summary" in symbol_names
+
+
+def test_chunk_memory_mixed_corpus_no_crash() -> None:
+    """Chunks without summary_embedding do not cause errors when chunk_memory_enabled=True."""
+    corpus = _make_corpus_with_summaries()
+    retrieval = FakeRetrieval([])
+    svc = QueryService(corpus=corpus, retrieval_service=retrieval)
+
+    result = svc.query(
+        "irrelevant content",
+        corpora=["file_corpus"],
+        chunk_memory_enabled=True,
+        query_embedding=[1.0, 0.0, 0.0],
+    )
+    assert not result["degraded"]
+
+
+def test_chunk_memory_summary_error_falls_back_to_lexical() -> None:
+    """If summary retrieval raises, result is not degraded and falls back to lexical."""
+
+    class BustedSummaryCorpus(FileCorpusService):
+        def query_with_summaries(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:  # type: ignore[override]
+            raise RuntimeError("embedding service down")
+
+    corpus = BustedSummaryCorpus()
+    corpus.upsert_chunks(
+        root="/repo",
+        file_path="y.py",
+        chunks=[
+            {"content": "hello world", "line_start": 1, "line_end": 1},
+        ],
+    )
+    retrieval = FakeRetrieval([])
+    svc = QueryService(corpus=corpus, retrieval_service=retrieval)
+
+    result = svc.query(
+        "hello",
+        corpora=["file_corpus"],
+        chunk_memory_enabled=True,
+        query_embedding=[1.0, 0.0, 0.0],
+    )
+
+    assert len(result["hits"]) >= 1
+    assert not result["degraded"]
+
+
+def test_chunk_memory_disabled_flag_off_exact_baseline() -> None:
+    """Results with chunk_memory_enabled=False must be byte-for-byte identical to baseline."""
+    corpus = _make_corpus_with_chunks()
+    retrieval = FakeRetrieval([_fake_memory_result()])
+    svc = QueryService(corpus=corpus, retrieval_service=retrieval)
+
+    result_baseline = svc.query("hello", corpora=["all"])
+    result_flag_off = svc.query("hello", corpora=["all"], chunk_memory_enabled=False)
+
+    assert result_baseline == result_flag_off

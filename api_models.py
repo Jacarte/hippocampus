@@ -90,6 +90,13 @@ class UnifiedQueryResponse(BaseModel):
 
 class IndexSyncRequest(BaseModel):
     root: str
+    generate_summaries: bool = Field(
+        default=False,
+        description=(
+            "When True, the indexing pipeline generates natural-language summaries "
+            "for each indexed chunk. Disabled by default to keep sync fast."
+        ),
+    )
 
 
 class IndexSyncResponse(BaseModel):
@@ -123,10 +130,24 @@ class IndexResetResponse(BaseModel):
 
 class WatchStartRequest(BaseModel):
     root: str
+    generate_summaries: bool = Field(
+        default=False,
+        description=(
+            "When True, newly detected files will have chunk summaries generated "
+            "as they are indexed by the file watcher. Disabled by default."
+        ),
+    )
 
 
 class WatchStopRequest(BaseModel):
     root: str
+    generate_summaries: bool = Field(
+        default=False,
+        description=(
+            "Forwarded from the originating WatchStartRequest so the stop handler "
+            "can clean up any summary-generation state. Defaults to False."
+        ),
+    )
 
 
 class CapabilitiesResponse(BaseModel):

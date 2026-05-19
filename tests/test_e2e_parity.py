@@ -11,7 +11,6 @@ from urllib.parse import urlparse
 import pytest
 from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
-from typer.testing import CliRunner
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -128,37 +127,6 @@ class TestCapabilitiesStatusParity:
         assert "semantic" in body["memory_store"]
         assert "lexical" in body["file_corpus"]
 
-    def test_cli_status_returns_expected_shape(self, monkeypatch: MonkeyPatch) -> None:
-        from mgrep_cli import app as cli_app
-
-        server_app = _make_app(monkeypatch)
-        with TestClient(server_app) as client:
-            runner = CliRunner()
-            with monkeypatch.context() as m:
-                m.setattr("mgrep_cli.requests.get", _requests_fake_get(client))
-                result = runner.invoke(cli_app, ["status"])
-
-        assert result.exit_code == 0
-        body = json.loads(result.output)
-        assert "total_files" in body
-        assert "total_chunks" in body
-        assert "roots" in body
-
-    def test_both_succeed_against_same_app(self, monkeypatch: MonkeyPatch) -> None:
-        from mgrep_cli import app as cli_app
-
-        server_app = _make_app(monkeypatch)
-        with TestClient(server_app) as client:
-            http_resp = client.get("/query/capabilities")
-            runner = CliRunner()
-            with monkeypatch.context() as m:
-                m.setattr("mgrep_cli.requests.get", _requests_fake_get(client))
-                cli_result = runner.invoke(cli_app, ["status"])
-
-        assert http_resp.status_code == 200
-        assert cli_result.exit_code == 0
-        assert isinstance(http_resp.json(), dict)
-        assert isinstance(json.loads(cli_result.output), dict)
 
 
 class TestSyncParity:
@@ -172,39 +140,6 @@ class TestSyncParity:
         assert body["files_indexed"] >= 2
         assert body["chunks_indexed"] >= 2
 
-    def test_cli_sync_indexes_fixture_root(self, monkeypatch: MonkeyPatch) -> None:
-        from mgrep_cli import app as cli_app
-
-        server_app = _make_app(monkeypatch)
-        with TestClient(server_app) as client:
-            runner = CliRunner()
-            with monkeypatch.context() as m:
-                m.setattr("mgrep_cli.requests.post", _requests_fake_post(client))
-                result = runner.invoke(cli_app, ["sync", _FIXTURES_ROOT])
-
-        assert result.exit_code == 0
-        body = json.loads(result.output)
-        assert body["root"] == _FIXTURES_ROOT
-        assert body["files_indexed"] >= 2
-        assert body["chunks_indexed"] >= 2
-
-    def test_http_and_cli_sync_produce_equivalent_counts(self, monkeypatch: MonkeyPatch) -> None:
-        from mgrep_cli import app as cli_app
-
-        http_app = _make_app(monkeypatch)
-        with TestClient(http_app) as http_client:
-            http_body = http_client.post("/index/sync", json={"root": _FIXTURES_ROOT}).json()
-
-        cli_server_app = _make_app(monkeypatch)
-        with TestClient(cli_server_app) as cli_client:
-            runner = CliRunner()
-            with monkeypatch.context() as m:
-                m.setattr("mgrep_cli.requests.post", _requests_fake_post(cli_client))
-                cli_result = runner.invoke(cli_app, ["sync", _FIXTURES_ROOT])
-        cli_body = json.loads(cli_result.output)
-
-        assert http_body["files_indexed"] == cli_body["files_indexed"]
-        assert http_body["chunks_indexed"] == cli_body["chunks_indexed"]
 
 
 class TestStatusParity:

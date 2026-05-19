@@ -11,7 +11,6 @@ from typing import Any
 from api_models import FileHit, MemoryHit, UnifiedQueryResponse
 from services.file_corpus_service import FileCorpusService
 
-
 class QueryService:
     """Fuses results from the memory store and the file corpus."""
 
@@ -32,6 +31,8 @@ class QueryService:
         language_filter: str | None = None,
         scope_filter: str | None = None,
         user_id: str | None = None,
+        chunk_memory_enabled: bool = False,
+        query_embedding: list[float] | None = None,
     ) -> dict[str, Any]:
         """Execute a fused cross-corpus query.
 
@@ -49,6 +50,16 @@ class QueryService:
                 the file corpus.
             user_id: Optional user identifier forwarded to the memory
                 store retrieval call.
+            chunk_memory_enabled: When ``True``, file-corpus retrieval
+                also consults ``summary_embedding`` fields on chunks via
+                semantic similarity.  Requires *query_embedding* to be
+                provided.  When ``False`` (default), behavior is
+                identical to the previous lexical-only baseline.
+            query_embedding: A vector embedding of *query_text* used for
+                semantic similarity search against chunk summary
+                embeddings.  Only consulted when
+                *chunk_memory_enabled* is ``True``.  Chunks without
+                embeddings are skipped silently.
 
         Returns:
             A dict matching the UnifiedQueryResponse shape containing
@@ -70,6 +81,8 @@ class QueryService:
                         path_filter=path_filter,
                         language_filter=language_filter,
                         limit=limit,
+                        chunk_memory_enabled=chunk_memory_enabled,
+                        query_embedding=query_embedding,
                     )
                 )
             except Exception as exc:  # noqa: BLE001
@@ -104,7 +117,15 @@ class QueryService:
         path_filter: str | None,
         language_filter: str | None,
         limit: int,
+        chunk_memory_enabled: bool = False,
+        query_embedding: list[float] | None = None,
     ) -> list[FileHit]:
+        """Query the file corpus and return normalised FileHit objects.
+
+        When *chunk_memory_enabled* is ``True`` and *query_embedding* is
+        provided, the underlying corpus query also performs semantic
+        similarity search against chunk summary embeddings.
+        """
         filters: dict[str, Any] = {}
         if path_filter is not None:
             filters["file_path"] = path_filter
@@ -112,7 +133,11 @@ class QueryService:
             filters["language"] = language_filter
 
         raw: list[dict[str, Any]] = self._corpus.query(
-            query_text, filters=filters or None, limit=limit
+            query_text,
+            filters=filters or None,
+            limit=limit,
+            chunk_memory_enabled=chunk_memory_enabled,
+            query_embedding=query_embedding,
         )
 
         return [
@@ -157,7 +182,6 @@ class QueryService:
             )
             for result in raw
         ]
-
 
 def _expand_corpora(corpora: list[str]) -> list[str]:
     if "all" in corpora:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
@@ -8,6 +9,9 @@ from services.file_corpus_service import FileCorpusService
 from services.file_scanner import FileScanner, _EXT_TO_LANG
 from services.index_manifest_service import IndexManifestService
 from services.chunkers import CodeChunker, MarkdownChunker
+from services.summary_service import SummaryService
+
+logger = logging.getLogger(__name__)
 
 _MARKDOWN_EXTS = {".md", ".txt", ".rst"}
 
@@ -25,17 +29,48 @@ def _ext(file_path: str) -> str:
 
 
 class IndexingService:
+    """Service that synchronises a directory tree into the file corpus.
+
+    Args:
+        corpus: Storage layer for chunk records.
+        manifest: Tracks per-file fingerprints and chunk IDs.
+        scanner: Scans the filesystem and detects changes.
+        memory_instance: Optional mem0 Memory instance used to instantiate
+            :class:`~services.summary_service.SummaryService` when
+            ``generate_summaries=True`` is passed to :meth:`sync`.  When
+            ``None``, summary generation is silently skipped even if
+            ``generate_summaries=True``.
+    """
+
     def __init__(
         self,
         corpus: FileCorpusService,
         manifest: IndexManifestService,
         scanner: FileScanner,
+        memory_instance: Any = None,
     ) -> None:
         self._corpus = corpus
         self._manifest = manifest
         self._scanner = scanner
+        self._memory = memory_instance
 
-    def sync(self, root: str) -> dict[str, Any]:
+    def sync(self, root: str, generate_summaries: bool = False) -> dict[str, Any]:
+        """Synchronise *root* into the corpus and manifest.
+
+        Args:
+            root: Absolute path to the directory tree to index.
+            generate_summaries: When ``True`` and a memory instance is
+                available, call :class:`~services.summary_service.SummaryService`
+                for each indexed chunk and store the resulting
+                ``summary_text`` / ``summary_embedding`` fields.  Any
+                failure during summary generation logs a warning and leaves
+                the chunk stored without summary fields.  Defaults to
+                ``False`` (no summaries generated).
+
+        Returns:
+            A dict with keys ``root``, ``files_indexed``, ``chunks_indexed``,
+            ``synced_at``, and ``errors``.
+        """
         self._manifest.register_root(root)
 
         current_files = self._scanner.scan(root)
@@ -72,6 +107,25 @@ class IndexingService:
                 else:
                     language = _EXT_TO_LANG.get(ext, "unknown")
                     chunks = CodeChunker().chunk(file_path, content, language)
+
+                if generate_summaries and self._memory is not None:
+                    summary_svc = SummaryService(self._memory)
+                    for chunk in chunks:
+                        try:
+                            result = summary_svc.generate_summary(
+                                chunk.get("content", ""),
+                                chunk.get("symbol_name") or "",
+                            )
+                            text = result.summary_text
+                            if text and text.strip():
+                                chunk["summary_text"] = text
+                                chunk["summary_embedding"] = result.summary_embedding
+                        except Exception as exc:
+                            logger.warning(
+                                "Summary generation failed for chunk in %s: %s",
+                                file_path,
+                                exc,
+                            )
 
                 self._corpus.upsert_chunks(root, file_path, chunks)
 

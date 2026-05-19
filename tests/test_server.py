@@ -2008,3 +2008,39 @@ def test_unified_query_rejects_empty_query(monkeypatch):
     with TestClient(app) as client:
         resp = client.post("/query", json={"query": ""})
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Tests for generate_summaries field and is_chunk_memory_enabled
+# ---------------------------------------------------------------------------
+
+def test_index_sync_accepts_generate_summaries_flag(monkeypatch):
+    app = _make_app_no_live_deps(monkeypatch)
+    with TestClient(app) as client:
+        resp = client.post("/index/sync", json={"root": "/tmp", "generate_summaries": True})
+    assert resp.status_code == 200
+
+
+def test_index_sync_legacy_payload_without_generate_summaries(monkeypatch):
+    app = _make_app_no_live_deps(monkeypatch)
+    with TestClient(app) as client:
+        resp = client.post("/index/sync", json={"root": "/tmp"})
+    assert resp.status_code == 200
+
+
+def test_use_chunk_memory_env_parsing(monkeypatch):
+    import importlib
+    runtime = importlib.import_module("services.runtime")
+
+    truthy_values = ["1", "true", "True", "TRUE", "yes", "Yes", "YES"]
+    for val in truthy_values:
+        monkeypatch.setenv("USE_CHUNK_MEMORY", val)
+        assert runtime.is_chunk_memory_enabled() is True, f"Expected True for {val!r}"
+
+    falsy_values = ["0", "false", "no", "off", "", "maybe"]
+    for val in falsy_values:
+        monkeypatch.setenv("USE_CHUNK_MEMORY", val)
+        assert runtime.is_chunk_memory_enabled() is False, f"Expected False for {val!r}"
+
+    monkeypatch.delenv("USE_CHUNK_MEMORY", raising=False)
+    assert runtime.is_chunk_memory_enabled() is False, "Expected False when unset"
