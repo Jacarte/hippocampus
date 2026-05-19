@@ -153,3 +153,34 @@ class WatchStopRequest(BaseModel):
 class CapabilitiesResponse(BaseModel):
     memory_store: dict[str, Any]
     file_corpus: dict[str, Any]
+
+
+class FileContent(BaseModel):
+    """A single file's path and raw content, as submitted by the client."""
+
+    file_path: str = Field(..., description="Relative file path (e.g. 'src/main.rs').")
+    content: str = Field(..., description="Full raw text content of the file.")
+
+
+class FileIngestRequest(BaseModel):
+    """Request body for POST /index/ingest."""
+
+    root: str = Field(
+        ...,
+        description=(
+            "Logical root label for this batch (e.g. the project path on the client). "
+            "Used as the corpus namespace — does not need to exist on the server."
+        ),
+    )
+    files: list[FileContent] = Field(
+        ...,
+        min_length=1,
+        description="Files to ingest. Each entry carries the relative path and full content.",
+    )
+    generate_summaries: bool = Field(
+        default=False,
+        description=(
+            "When True, generate LLM summaries for each indexed chunk "
+            "(requires memory to be configured)."
+        ),
+    )
