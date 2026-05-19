@@ -137,6 +137,20 @@ class FileCorpusService:
         appears verbatim in the content, rewarding exact matches over scattered
         token hits.  Results are sorted descending by score before the *limit*
         cap is applied so the highest-scoring chunks are always returned.
+
+        Args:
+            query_text: The search string.  Chunks that do not contain
+                *query_text* as a substring (case-insensitive) are excluded
+                before scoring.  An empty string matches all chunks.
+            filters: Optional dict of ``{field: value}`` pairs applied as an
+                AND filter after the substring check.  ``None`` disables
+                filtering.  All values are compared as strings.
+            limit: Maximum number of results to return after sorting.
+
+        Returns:
+            List of chunk dicts (copies of stored chunks) with an added
+            ``"score"`` key (float, rounded to 6 decimal places), sorted
+            descending by score, capped at *limit*.
         """
         results: list[dict[str, Any]] = []
         lowered_query = query_text.lower()

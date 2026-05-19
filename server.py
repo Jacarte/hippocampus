@@ -13,6 +13,7 @@ from api_models import (
     CapabilitiesResponse,
     IndexResetRequest,
     IndexSyncRequest,
+    FileIngestRequest,
     MemoryCreate,
     RetrieveRequest,
     SearchRequest,
@@ -274,6 +275,30 @@ def create_app(
             lambda: request.app.state.indexing_service.sync(
                 sync_req.root,
                 generate_summaries=sync_req.generate_summaries,
+            ),
+        )
+
+    @app.post("/index/ingest", summary="Ingest file contents into the corpus")
+    def index_ingest(ingest_req: FileIngestRequest, request: Request) -> Any:
+        """Accept pre-read file contents and index them into the corpus.
+
+        Unlike ``POST /index/sync``, which requires the server to read files
+        from its own filesystem, this endpoint accepts file contents in the
+        request body.  Use it when the server is remote or does not share a
+        filesystem with the client.
+
+        The corpus namespace is ``project_id`` when provided, otherwise
+        ``root``.  Using a stable ``project_id`` ensures that chunks from the
+        same project indexed from different machines or paths are stored
+        together and do not collide with other projects.
+        """
+        return _execute_service_call(
+            "index_ingest",
+            lambda: request.app.state.indexing_service.ingest(
+                root=ingest_req.root,
+                files=[f.model_dump() for f in ingest_req.files],
+                generate_summaries=ingest_req.generate_summaries,
+                project_id=ingest_req.project_id,
             ),
         )
 

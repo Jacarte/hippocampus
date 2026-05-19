@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from datetime import datetime, timezone
@@ -57,8 +58,20 @@ class IndexingService:
     def sync(self, root: str, generate_summaries: bool = False) -> dict[str, Any]:
         """Synchronise *root* into the corpus and manifest.
 
+        Reads files directly from the server's local filesystem, so *root* must
+        be a path that is accessible to the server process.  This makes it
+        suitable only for co-located (same-machine) use.  For remote or
+        cross-machine indexing, use :meth:`ingest` instead, which accepts file
+        contents supplied by the caller rather than reading them from disk.
+
+        Unlike :meth:`ingest`, this method also handles deletions: files that
+        were previously indexed but are no longer present on disk are removed
+        from the corpus.  The namespace key is always *root* itself; there is no
+        ``project_id`` override here.
+
         Args:
-            root: Absolute path to the directory tree to index.
+            root: Absolute path to the directory tree to index.  Must be
+                accessible to the server process at call time.
             generate_summaries: When ``True`` and a memory instance is
                 available, call :class:`~services.summary_service.SummaryService`
                 for each indexed chunk and store the resulting
@@ -150,6 +163,94 @@ class IndexingService:
             "files_indexed": files_indexed,
             "chunks_indexed": chunks_indexed,
             "synced_at": _now_iso(),
+            "errors": errors,
+        }
+
+    def ingest(
+        self,
+        root: str,
+        files: list[dict[str, str]],
+        generate_summaries: bool = False,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Ingest pre-read file contents into the corpus.
+
+        Unlike :meth:`sync`, this method does not touch the filesystem — the
+        caller supplies file contents directly.  This makes it safe to use with
+        a remote server that has no access to the client's filesystem.
+
+        Args:
+            root: Logical namespace label for this batch (e.g. the project root
+                on the client machine).  Does not need to exist on the server.
+            files: List of dicts, each with ``file_path`` (str) and ``content``
+                (str) keys.
+            generate_summaries: When ``True`` and a memory instance is available,
+                generate LLM chunk summaries.  Silently skipped when memory is
+                not configured.
+            project_id: Optional stable project identifier. When provided, used
+                as the corpus namespace instead of *root*, ensuring that chunks
+                from the same project indexed from different machines or paths
+                do not overlap with other projects.
+
+        Returns:
+            Dict with ``root``, ``files_indexed``, ``chunks_indexed``,
+            ``ingested_at``, and ``errors`` keys.
+        """
+        namespace = project_id if project_id else root
+        self._manifest.register_root(namespace)
+
+        files_indexed = 0
+        chunks_indexed = 0
+        errors: list[str] = []
+
+        for file_entry in files:
+            file_path: str = file_entry["file_path"]
+            content: str = file_entry["content"]
+            try:
+                ext = _ext(file_path)
+                if ext in _MARKDOWN_EXTS:
+                    chunks = MarkdownChunker().chunk(file_path, content)
+                else:
+                    language = _EXT_TO_LANG.get(ext, "unknown")
+                    chunks = CodeChunker().chunk(file_path, content, language)
+
+                if generate_summaries and self._memory is not None:
+                    summary_svc = SummaryService(self._memory)
+                    for chunk in chunks:
+                        try:
+                            result = summary_svc.generate_summary(
+                                chunk.get("content", ""),
+                                chunk.get("symbol_name") or "",
+                            )
+                            text = result.summary_text
+                            if text and text.strip():
+                                chunk["summary_text"] = text
+                                chunk["summary_embedding"] = result.summary_embedding
+                        except Exception as exc:
+                            logger.warning(
+                                "Summary generation failed for chunk in %s: %s",
+                                file_path,
+                                exc,
+                            )
+
+                self._corpus.upsert_chunks(namespace, file_path, chunks)
+
+                chunk_ids = [c.get("id", str(i)) for i, c in enumerate(chunks)]
+                fingerprint = hashlib.sha256(
+                    content.encode("utf-8", errors="replace")
+                ).hexdigest()
+                self._manifest.update_file(namespace, file_path, fingerprint, chunk_ids)
+
+                files_indexed += 1
+                chunks_indexed += len(chunks)
+            except Exception as exc:
+                errors.append(f"{file_path}: {exc}")
+
+        return {
+            "root": root,
+            "files_indexed": files_indexed,
+            "chunks_indexed": chunks_indexed,
+            "ingested_at": _now_iso(),
             "errors": errors,
         }
 

@@ -170,6 +170,23 @@ class QueryService:
 
         Returns an empty list when *memory_instance* is ``None`` (memory not yet
         initialised), instead of raising, so the file-corpus path is unaffected.
+
+        Args:
+            query_text: Natural-language query string forwarded to the retrieval
+                backend.
+            limit: Maximum number of results to return.
+            user_id: When not ``None``, forwarded as ``user_id`` to the retrieval
+                call to scope results to a specific user.  Omitted from the call
+                when ``None``.
+            memory_instance: Initialised memory object with a ``search`` method.
+                When ``None``, the method returns ``[]`` immediately without
+                contacting the backend.
+
+        Returns:
+            List of :class:`~api_models.MemoryHit` objects, each with
+            ``memory_id``, ``content``, ``score``, ``corpus`` (always
+            ``"memory_store"``), and optional ``metadata`` fields.  Empty list
+            if *memory_instance* is ``None`` or the backend returns no results.
         """
         if memory_instance is None:
             return []
