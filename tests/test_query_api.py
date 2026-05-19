@@ -14,12 +14,12 @@ class FakeRetrieval:
     def __init__(self, results: list[dict[str, Any]]) -> None:
         self._results = results
 
-    def search(self, **_kwargs: Any) -> list[dict[str, Any]]:
+    def search(self, memory_instance: Any, **_kwargs: Any) -> list[dict[str, Any]]:
         return self._results
 
 
 class ErrorRetrieval:
-    def search(self, **_kwargs: Any) -> list[dict[str, Any]]:
+    def search(self, memory_instance: Any, **_kwargs: Any) -> list[dict[str, Any]]:
         raise RuntimeError("memory unavailable")
 
 
@@ -64,7 +64,7 @@ def test_query_returns_fused_results() -> None:
     retrieval = FakeRetrieval([_fake_memory_result()])
     svc = QueryService(corpus=corpus, retrieval_service=retrieval)
 
-    result = svc.query("hello", corpora=["all"])
+    result = svc.query("hello", corpora=["all"], memory_instance=object())
 
     assert result["total"] == 3
     assert len(result["hits"]) == 3
@@ -91,7 +91,7 @@ def test_query_memory_only() -> None:
     retrieval = FakeRetrieval([_fake_memory_result()])
     svc = QueryService(corpus=corpus, retrieval_service=retrieval)
 
-    result = svc.query("hello", corpora=["memory_store"])
+    result = svc.query("hello", corpora=["memory_store"], memory_instance=object())
 
     assert len(result["hits"]) == 1
     assert result["hits"][0]["corpus"] == "memory_store"
@@ -107,7 +107,7 @@ def test_query_degrades_gracefully_on_file_corpus_error() -> None:
     retrieval = FakeRetrieval([_fake_memory_result()])
     svc = QueryService(corpus=ErrorCorpus(), retrieval_service=retrieval)  # type: ignore[arg-type]
 
-    result = svc.query("hello", corpora=["all"])
+    result = svc.query("hello", corpora=["all"], memory_instance=object())
 
     assert result["degraded"] is True
     assert any("file_corpus" in r for r in result["degradation_reasons"])
@@ -119,7 +119,7 @@ def test_query_degrades_gracefully_on_memory_error() -> None:
     corpus = _make_corpus_with_chunks()
     svc = QueryService(corpus=corpus, retrieval_service=ErrorRetrieval())
 
-    result = svc.query("hello", corpora=["all"])
+    result = svc.query("hello", corpora=["all"], memory_instance=object())
 
     assert result["degraded"] is True
     assert any("memory_store" in r for r in result["degradation_reasons"])
