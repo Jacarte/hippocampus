@@ -2,10 +2,15 @@
 
 set -e
 
-echo "🐋 Building mem0-server Docker image..."
-docker-compose build --no-cache mem0-server
+# Read version from VERSION file (source of truth for image tags)
+VERSION=$(cat VERSION)
 
-echo "✅ Build complete!"
+echo "🐋 Building mem0-server Docker image (version: ${VERSION})..."
+docker-compose build --no-cache \
+  --build-arg VERSION="${VERSION}" \
+  mem0-server
+
+echo "✅ Build complete! Image tagged as mem0-server:${VERSION}"
 echo ""
 echo "To start the services, run:"
 echo "  docker-compose up -d"
