@@ -34,6 +34,7 @@ from services.runtime import (
     get_memory_instance,
     get_runtime_options,
     initialize_memory,
+    is_chunk_memory_enabled,
 )
 from services.tracing import (
     bind_request_id,
@@ -247,6 +248,7 @@ def create_app(
 
     @app.post("/query", summary="Unified cross-corpus query")
     def unified_query(query_req: UnifiedQueryRequest, request: Request) -> Any:
+        chunk_memory_enabled = is_chunk_memory_enabled()
         return _execute_service_call(
             "unified_query",
             lambda: request.app.state.query_service.query(
@@ -256,6 +258,7 @@ def create_app(
                 path_filter=query_req.path_filter,
                 language_filter=query_req.language_filter,
                 scope_filter=query_req.scope_filter,
+                chunk_memory_enabled=chunk_memory_enabled,
             ),
         )
 
@@ -263,7 +266,10 @@ def create_app(
     def index_sync(sync_req: IndexSyncRequest, request: Request) -> Any:
         return _execute_service_call(
             "index_sync",
-            lambda: request.app.state.indexing_service.sync(sync_req.root),
+            lambda: request.app.state.indexing_service.sync(
+                sync_req.root,
+                generate_summaries=sync_req.generate_summaries,
+            ),
         )
 
     @app.post("/index/watch/start", summary="Start watching a root directory")

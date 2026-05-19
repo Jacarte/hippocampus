@@ -270,87 +270,131 @@ To keep the docs aligned with the implemented backend, this README does not clai
 - any retrieval source beyond the existing memory store
 - any reranker dependency outside the current in-process heuristic default
 
-## mgrep CLI
+## m0grep CLI
 
-`mgrep_cli.py` is an HTTP command-line client for indexing a local file corpus and searching across it (and the memory store). The default backend URL is `http://localhost:8000`.
+`m0grep` is the native Rust CLI for the mem0server backend. It is the recommended client for indexing a local file corpus and searching across it (and the memory store). The source lives in `cli/` and the binary is named `m0grep`.
 
-### Index a directory
+A legacy Python client (`mgrep_cli.py`) remains in the repository but `m0grep` is the canonical tool.
 
-Walk a directory tree and push every file into the backend corpus:
+### Installation
 
-```bash
-python mgrep_cli.py sync /path/to/project
-```
-
-`sync` is a one-shot operation — run it after a bulk checkout or initial setup. For ongoing changes, use `watch` instead.
-
-### Watch for file changes
-
-Start a background watcher that incrementally re-indexes files as they are saved:
+Download the pre-built binary from the [GitHub Releases](https://github.com/your-org/mem0server/releases) page, then make it executable and place it on your `PATH`:
 
 ```bash
-python mgrep_cli.py watch /path/to/project
+# example for macOS/Linux — adjust the filename for your platform
+curl -L https://github.com/your-org/mem0server/releases/latest/download/m0grep-x86_64-apple-darwin \
+  -o m0grep
+chmod +x m0grep
+mv m0grep /usr/local/bin/m0grep
 ```
 
-Stop it when you no longer need live re-indexing:
+Verify the installation:
 
 ```bash
-python mgrep_cli.py watch /path/to/project --stop
+m0grep --help
 ```
 
-The watcher is useful during active development: edit a file, save it, and subsequent `query` calls reflect the change without a full `sync`.
+### Environment
 
-### Search
+`m0grep` reads the `MEM0_SERVER_URL` environment variable to determine the backend host. The default when the variable is unset is `http://localhost:8000`.
+
+```bash
+export MEM0_SERVER_URL=http://localhost:8000  # default — can be omitted
+```
+
+Every command also accepts `--url` to override the target host for that invocation.
+
+### Commands
+
+#### query — search the corpus
 
 Search across all corpora (files + memory) with a keyword or phrase:
 
 ```bash
-python mgrep_cli.py query "authentication middleware"
+m0grep query "authentication middleware"
 ```
 
 Restrict results to the file corpus only and filter by language:
 
 ```bash
-python mgrep_cli.py query "token refresh" --corpus files --language-filter python
+m0grep query "token refresh" --corpus files --language-filter python
 ```
 
 Limit results and narrow by path prefix:
 
 ```bash
-python mgrep_cli.py query "database connection" --limit 5 --path-filter src/db
+m0grep query "database connection" --limit 5 --path-filter src/db
 ```
 
 Get raw JSON output (useful for scripting or piping to `jq`):
 
 ```bash
-python mgrep_cli.py query "retry logic" --raw
+m0grep query "retry logic" --raw
 ```
 
 **Corpus values:** `all` (default), `files`, `memory`.  
 **Limit range:** 1–50, default 10.
 
-### Check index status
+#### sync — index a directory
+
+Walk a directory tree and push every file into the backend corpus:
+
+```bash
+m0grep sync /path/to/project
+```
+
+`sync` is a one-shot operation — run it after a bulk checkout or initial setup. For ongoing changes, use `watch` instead.
+
+Pass `--generate-summaries` to have the server generate natural-language summaries for each indexed chunk. This is disabled by default to keep sync fast:
+
+```bash
+m0grep sync /path/to/project --generate-summaries
+```
+
+#### watch — watch for file changes
+
+Start a background watcher that incrementally re-indexes files as they are saved:
+
+```bash
+m0grep watch /path/to/project
+```
+
+Enable chunk summaries for newly detected files (mirrors `sync --generate-summaries`):
+
+```bash
+m0grep watch /path/to/project --generate-summaries
+```
+
+Stop watching when you no longer need live re-indexing:
+
+```bash
+m0grep watch /path/to/project --stop
+```
+
+The watcher is useful during active development: edit a file, save it, and subsequent `query` calls reflect the change without a full `sync`.
+
+#### status — check index state
 
 Inspect how many documents are indexed and the current backend state:
 
 ```bash
-python mgrep_cli.py status
+m0grep status
 ```
 
 The response shows counts per corpus and any active watcher information.
 
-### Reset the index
+#### reset — wipe the index
 
 Wipe all indexed data. Without `--yes`, the command prompts for interactive confirmation:
 
 ```bash
-python mgrep_cli.py reset
+m0grep reset
 ```
 
 Skip the confirmation prompt:
 
 ```bash
-python mgrep_cli.py reset --yes
+m0grep reset --yes
 ```
 
 ### Custom backend URL
@@ -358,10 +402,28 @@ python mgrep_cli.py reset --yes
 All commands accept `--url` to target a non-default host or port:
 
 ```bash
-python mgrep_cli.py status --url http://localhost:9000
-python mgrep_cli.py sync /path/to/project --url http://remote-host:8000
-python mgrep_cli.py query "search term" --url http://localhost:9000
+m0grep status --url http://localhost:9000
+m0grep sync /path/to/project --url http://remote-host:8000
+m0grep query "search term" --url http://localhost:9000
 ```
+
+### Server-side flags for sync and watch
+
+#### generate_summaries
+
+When `generate_summaries: true` is sent in a `POST /index/sync` or `POST /index/watch/start` request body, the indexing pipeline generates natural-language summaries for each indexed chunk. The flag is `false` by default to keep sync fast.
+
+The `--generate-summaries` flag on the `m0grep sync` and `m0grep watch` commands maps to this request field.
+
+#### USE_CHUNK_MEMORY (server env var)
+
+The server reads the `USE_CHUNK_MEMORY` environment variable to gate chunk-level memory features. Accepted truthy values are `1`, `true`, and `yes` (case-insensitive). Any other value — including an unset variable — leaves the feature disabled.
+
+```bash
+export USE_CHUNK_MEMORY=true  # enable chunk-level memory on the server
+```
+
+This variable is evaluated server-side at startup; restarting the server is required for changes to take effect.
 
 ## MCP Integration (OpenCode)
 

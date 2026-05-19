@@ -468,3 +468,186 @@ class TestWatchService:
         assert root2 in roots
 
         watch.stop(root2)
+
+
+class TestFileCorpusSummaryFields:
+    def test_file_corpus_stores_summary_text_when_provided(self):
+        svc = FileCorpusService()
+        svc.upsert_chunks(
+            root="/repo",
+            file_path="src/a.py",
+            chunks=[{"content": "def hello(): pass", "summary_text": "some summary"}],
+        )
+        results = svc.query("hello")
+        assert len(results) == 1
+        assert results[0]["summary_text"] == "some summary"
+
+    def test_file_corpus_stores_nullable_summary_embedding(self):
+        svc = FileCorpusService()
+        svc.upsert_chunks(
+            root="/repo",
+            file_path="src/b.py",
+            chunks=[{"content": "def world(): pass"}],
+        )
+        results = svc.query("world")
+        assert len(results) == 1
+        assert results[0]["summary_text"] is None
+        assert results[0]["summary_embedding"] is None
+
+    def test_file_corpus_mixed_summary_and_plain_chunks_query_safely(self):
+        svc = FileCorpusService()
+        svc.upsert_chunks(
+            root="/repo",
+            file_path="src/c.py",
+            chunks=[
+                {"content": "chunk with summary", "summary_text": "a summary", "summary_embedding": [0.1, 0.2]},
+                {"content": "chunk without summary"},
+            ],
+        )
+        results = svc.query("chunk")
+        assert len(results) == 2
+        with_summary = next(r for r in results if r["summary_text"] is not None)
+        without_summary = next(r for r in results if r["summary_text"] is None)
+        assert with_summary["summary_text"] == "a summary"
+        assert with_summary["summary_embedding"] == [0.1, 0.2]
+        assert without_summary["summary_embedding"] is None
+
+    def test_file_corpus_reset_clears_summary_fields(self):
+        svc = FileCorpusService()
+        svc.upsert_chunks(
+            root="/repo",
+            file_path="src/d.py",
+            chunks=[{"content": "something", "summary_text": "will be cleared"}],
+        )
+        assert svc.get_status()["total_chunks"] == 1
+        svc.reset()
+        assert svc.get_status()["total_chunks"] == 0
+        results = svc.query("something")
+        assert results == []
+
+
+class TestIndexingServiceSummaries:
+    def _make_service(self, memory_instance=None):
+        from services.indexing_service import IndexingService
+        from services.file_scanner import FileScanner
+        corpus = FileCorpusService()
+        manifest = IndexManifestService()
+        scanner = FileScanner()
+        return IndexingService(corpus, manifest, scanner, memory_instance=memory_instance), corpus, manifest
+
+    def test_sync_no_summaries_baseline_unchanged(self, tmp_path):
+        """generate_summaries=False (default) produces no summary fields on chunks."""
+        (tmp_path / "hello.py").write_text("def hello(): pass\n")
+        svc, corpus, _ = self._make_service()
+        result = svc.sync(str(tmp_path))
+        assert result["files_indexed"] == 1
+        chunks = corpus.query("hello")
+        assert len(chunks) >= 1
+        assert chunks[0]["summary_text"] is None
+        assert chunks[0]["summary_embedding"] is None
+
+    def test_sync_with_summaries_stores_text_and_embedding(self, tmp_path):
+        """generate_summaries=True calls SummaryService and stores results into the chunk record."""
+        from unittest.mock import MagicMock, patch
+        from services.summary_service import SummaryResult
+
+        (tmp_path / "hello.py").write_text("def hello(): pass\n")
+        mock_memory = MagicMock()
+        svc, corpus, _ = self._make_service(mock_memory)
+        mock_result = SummaryResult(summary_text="Greets the world", summary_embedding=[0.1, 0.2])
+
+        with patch("services.indexing_service.SummaryService") as MockSummary:
+            MockSummary.return_value.generate_summary.return_value = mock_result
+            result = svc.sync(str(tmp_path), generate_summaries=True)
+
+        assert result["files_indexed"] == 1
+        chunks = corpus.query("hello")
+        assert len(chunks) >= 1
+        assert chunks[0]["summary_text"] == "Greets the world"
+        assert chunks[0]["summary_embedding"] == [0.1, 0.2]
+
+    def test_sync_summary_exception_still_indexes_chunk_without_summary(self, tmp_path):
+        """If SummaryService.generate_summary raises, chunk is still indexed (no summary fields)."""
+        from unittest.mock import MagicMock, patch
+
+        (tmp_path / "hello.py").write_text("def hello(): pass\n")
+        mock_memory = MagicMock()
+        svc, corpus, _ = self._make_service(mock_memory)
+
+        with patch("services.indexing_service.SummaryService") as MockSummary:
+            MockSummary.return_value.generate_summary.side_effect = Exception("LLM unavailable")
+            result = svc.sync(str(tmp_path), generate_summaries=True)
+
+        assert result["files_indexed"] == 1
+        chunks = corpus.query("hello")
+        assert len(chunks) >= 1
+        assert chunks[0]["summary_text"] is None
+
+    def test_sync_empty_summary_text_not_stored(self, tmp_path):
+        """Whitespace-only summary_text is treated as failure: not stored."""
+        from unittest.mock import MagicMock, patch
+        from services.summary_service import SummaryResult
+
+        (tmp_path / "hello.py").write_text("def hello(): pass\n")
+        mock_memory = MagicMock()
+        svc, corpus, _ = self._make_service(mock_memory)
+
+        with patch("services.indexing_service.SummaryService") as MockSummary:
+            MockSummary.return_value.generate_summary.return_value = SummaryResult(
+                summary_text="   ", summary_embedding=[0.5]
+            )
+            svc.sync(str(tmp_path), generate_summaries=True)
+
+        chunks = corpus.query("hello")
+        assert chunks[0]["summary_text"] is None
+        assert chunks[0]["summary_embedding"] is None
+
+    def test_sync_summary_instantiated_with_memory_instance(self, tmp_path):
+        """SummaryService is created with the memory_instance passed to IndexingService."""
+        from unittest.mock import MagicMock, patch
+        from services.summary_service import SummaryResult
+
+        (tmp_path / "hello.py").write_text("def hello(): pass\n")
+        mock_memory = MagicMock()
+        svc, corpus, _ = self._make_service(mock_memory)
+
+        with patch("services.indexing_service.SummaryService") as MockSummary:
+            MockSummary.return_value.generate_summary.return_value = SummaryResult()
+            svc.sync(str(tmp_path), generate_summaries=True)
+
+        MockSummary.assert_called_once_with(mock_memory)
+
+
+class TestWatchServiceSummaryFlag:
+    def _make_watch(self, mock_indexing=None, poll_interval=0.05):
+        from unittest.mock import MagicMock
+        from services.watch_service import WatchService
+        if mock_indexing is None:
+            mock_indexing = MagicMock()
+        return WatchService(mock_indexing, poll_interval=poll_interval), mock_indexing
+
+    def test_watch_start_forwards_generate_summaries_false_by_default(self, tmp_path):
+        """WatchService calls sync with generate_summaries=False by default."""
+        import time
+        watch, mock_indexing = self._make_watch()
+        watch.start(str(tmp_path))
+        time.sleep(0.15)
+        watch.stop(str(tmp_path))
+        assert mock_indexing.sync.call_count >= 1
+        for call in mock_indexing.sync.call_args_list:
+            args, kwargs = call
+            flag = kwargs.get("generate_summaries", args[1] if len(args) > 1 else False)
+            assert flag is False
+
+    def test_watch_start_forwards_generate_summaries_true(self, tmp_path):
+        """WatchService.start(root, generate_summaries=True) passes flag to sync."""
+        import time
+        watch, mock_indexing = self._make_watch()
+        watch.start(str(tmp_path), generate_summaries=True)
+        time.sleep(0.15)
+        watch.stop(str(tmp_path))
+        assert mock_indexing.sync.call_count >= 1
+        for call in mock_indexing.sync.call_args_list:
+            args, kwargs = call
+            flag = kwargs.get("generate_summaries", args[1] if len(args) > 1 else False)
+            assert flag is True
