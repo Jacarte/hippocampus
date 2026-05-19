@@ -49,9 +49,6 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: m0grep-linux-amd64
-          - os: macos-13          # Intel / amd64
-            target: x86_64-apple-darwin
-            artifact: m0grep-macos-amd64
           - os: macos-14          # Apple Silicon / arm64
             target: aarch64-apple-darwin
             artifact: m0grep-macos-arm64
