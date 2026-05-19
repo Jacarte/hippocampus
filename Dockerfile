@@ -1,5 +1,3 @@
-# Version is passed from VERSION file via build.sh (--build-arg VERSION=...)
-ARG VERSION=dev
 FROM python:3.11-slim as builder
 
 WORKDIR /app
@@ -16,9 +14,6 @@ RUN pip install --user --no-cache-dir -r requirements.txt
 
 
 FROM python:3.11-slim
-
-ARG VERSION=dev
-LABEL org.opencontainers.image.version="${VERSION}"
 
 WORKDIR /app
 

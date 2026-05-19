@@ -157,15 +157,3 @@ def get_runtime_options() -> dict[str, Any]:
         "workers": int(os.environ.get("MEM0_WORKERS", "1")),
         "log_level": os.environ.get("MEM0_LOG_LEVEL", "info"),
     }
-
-
-def is_chunk_memory_enabled() -> bool:
-    """Return True if chunk-level memory is enabled via environment variable.
-
-    Reads the ``USE_CHUNK_MEMORY`` environment variable and treats the values
-    ``"1"``, ``"true"``, and ``"yes"`` (case-insensitive) as *enabled*.  Any
-    other value—including an unset variable—is treated as *disabled* and
-    returns ``False``.
-    """
-    value = os.environ.get("USE_CHUNK_MEMORY", "").strip().lower()
-    return value in {"1", "true", "yes"}

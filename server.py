@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+"""
+Mem0 REST API Server
+A FastAPI-based REST server for mem0 memory operations.
+
+Original source: https://code.m3ta.dev/m3tam3re/nixpkgs/src/branch/master/pkgs/mem0/server.py
+"""
+
 from __future__ import annotations
 
 import logging
@@ -9,32 +17,15 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from mem0 import Memory
 
-from api_models import (
-    CapabilitiesResponse,
-    IndexResetRequest,
-    IndexSyncRequest,
-    MemoryCreate,
-    RetrieveRequest,
-    SearchRequest,
-    UnifiedQueryRequest,
-    WatchStartRequest,
-    WatchStopRequest,
-)
+from api_models import MemoryCreate, RetrieveRequest, SearchRequest
 from services.anchor_service import AnchorService
-from services.file_corpus_service import FileCorpusService
-from services.file_scanner import FileScanner
-from services.index_manifest_service import IndexManifestService
-from services.indexing_service import IndexingService
 from services.memory_service import MemoryService
-from services.query_service import QueryService
 from services.retrieval_service import RetrievalService
-from services.watch_service import WatchService
 from services.runtime import (
     MemoryFactory,
     get_memory_instance,
     get_runtime_options,
     initialize_memory,
-    is_chunk_memory_enabled,
 )
 from services.tracing import (
     bind_request_id,
@@ -64,22 +55,6 @@ def create_app(
     app.state.memory_service = MemoryService(
         retrieval_service=RetrievalService(),
         anchor_service=AnchorService(),
-    )
-    _corpus = FileCorpusService()
-    _manifest = IndexManifestService()
-    _scanner = FileScanner()
-    _retrieval = RetrievalService()
-    app.state.indexing_service = IndexingService(
-        corpus=_corpus,
-        manifest=_manifest,
-        scanner=_scanner,
-    )
-    app.state.query_service = QueryService(
-        corpus=_corpus,
-        retrieval_service=_retrieval,
-    )
-    app.state.watch_service = WatchService(
-        indexing_service=app.state.indexing_service,
     )
 
     @app.middleware("http")
@@ -246,83 +221,6 @@ def create_app(
             lambda: request.app.state.memory_service.reset(memory_instance),
         )
 
-    @app.post("/query", summary="Unified cross-corpus query")
-    def unified_query(query_req: UnifiedQueryRequest, request: Request) -> Any:
-        chunk_memory_enabled = is_chunk_memory_enabled()
-        return _execute_service_call(
-            "unified_query",
-            lambda: request.app.state.query_service.query(
-                query_text=query_req.query,
-                corpora=query_req.corpora,
-                limit=query_req.limit,
-                path_filter=query_req.path_filter,
-                language_filter=query_req.language_filter,
-                scope_filter=query_req.scope_filter,
-                chunk_memory_enabled=chunk_memory_enabled,
-            ),
-        )
-
-    @app.post("/index/sync", summary="Sync a root directory into the file corpus")
-    def index_sync(sync_req: IndexSyncRequest, request: Request) -> Any:
-        return _execute_service_call(
-            "index_sync",
-            lambda: request.app.state.indexing_service.sync(
-                sync_req.root,
-                generate_summaries=sync_req.generate_summaries,
-            ),
-        )
-
-    @app.post("/index/watch/start", summary="Start watching a root directory")
-    def index_watch_start(watch_req: WatchStartRequest, request: Request) -> dict[str, Any]:
-        return _execute_service_call(
-            "index_watch_start",
-            lambda: (
-                request.app.state.watch_service.start(watch_req.root),
-                {"root": watch_req.root, "watching": True},
-            )[-1],
-        )
-
-    @app.post("/index/watch/stop", summary="Stop watching a root directory")
-    def index_watch_stop(watch_req: WatchStopRequest, request: Request) -> dict[str, Any]:
-        return _execute_service_call(
-            "index_watch_stop",
-            lambda: (
-                request.app.state.watch_service.stop(watch_req.root),
-                {"root": watch_req.root, "watching": False},
-            )[-1],
-        )
-
-    @app.get("/index/status", summary="Get file corpus index status")
-    def index_status(request: Request) -> Any:
-        return _execute_service_call(
-            "index_status",
-            lambda: request.app.state.indexing_service.status(),
-        )
-
-    @app.post("/index/reset", summary="Reset the file corpus index")
-    def index_reset(reset_req: IndexResetRequest, request: Request) -> Any:
-        return _execute_service_call(
-            "index_reset",
-            lambda: request.app.state.indexing_service.reset(),
-        )
-
-    @app.get("/query/capabilities", summary="Describe query capabilities")
-    def query_capabilities(request: Request) -> Any:
-        return _execute_service_call(
-            "query_capabilities",
-            lambda: CapabilitiesResponse(
-                memory_store={
-                    "lexical": True,
-                    "semantic": True,
-                    "rerank": False,
-                },
-                file_corpus={
-                    "lexical": True,
-                    "semantic": False,
-                },
-            ).model_dump(),
-        )
-
     return app
 
 
@@ -339,6 +237,7 @@ def _execute_service_call(operation: str, handler: Any) -> Any:
 
 
 app = create_app()
+
 
 if __name__ == "__main__":
     import uvicorn

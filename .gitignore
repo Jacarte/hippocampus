@@ -6,6 +6,3 @@ postgress_data/
 data/
 mem/
 __pycache__/
-
-# Rust CLI build artifacts
-/cli/target/
