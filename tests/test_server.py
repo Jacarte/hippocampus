@@ -1296,3 +1296,751 @@ def test_retrieve_returns_fused_results_when_rerank_fails(monkeypatch: MonkeyPat
     assert payload["results"][0]["id"] == "memory-1"
     assert payload["results"][0]["retrieval"]["matched_by"] == ["lexical", "semantic"]
     assert payload["results"][0]["retrieval"]["reranked"] is False
+
+
+# ---------------------------------------------------------------------------
+# Regression tests – explicit field-shape contracts
+# These tests MUST NOT regress when cross-corpus or retrieval work lands.
+# ---------------------------------------------------------------------------
+
+
+def _make_fake_memory_class_with_records(
+    records: "dict[str, dict[str, Any]]",
+) -> "type":
+    """Return a FakeMemory class pre-loaded with the supplied records."""
+
+    class FakeMemory:
+        def __init__(self, config: "dict[str, Any]") -> None:
+            self.config = config
+            self.records: "dict[str, dict[str, Any]]" = dict(records)
+
+        def add(
+            self, *, messages: "list[dict[str, Any]]", **params: "Any"
+        ) -> "dict[str, Any]":
+            new_id = "memory-new"
+            record = {"id": new_id, "messages": messages, **params}
+            self.records[new_id] = record
+            return record
+
+        def get(self, memory_id: str) -> "dict[str, Any]":
+            return self.records[memory_id]
+
+        def get_all(self, **_: "Any") -> "list[dict[str, Any]]":
+            return list(self.records.values())
+
+        def search(self, *, query: str, **params: "Any") -> "dict[str, Any]":
+            return {
+                "query": query,
+                "params": params,
+                "results": list(self.records.values()),
+            }
+
+        def update(
+            self, *, memory_id: str, data: "dict[str, Any]"
+        ) -> "dict[str, Any]":
+            self.records[memory_id] = {**self.records[memory_id], **data}
+            return self.records[memory_id]
+
+        def delete(self, *, memory_id: str) -> None:
+            self.records.pop(memory_id, None)
+
+        def delete_all(self, **_: "Any") -> None:
+            self.records.clear()
+
+        def reset(self) -> None:
+            self.records.clear()
+
+        def history(self, *, memory_id: str) -> "list[dict[str, Any]]":
+            return [{"memory_id": memory_id, "event": "created"}]
+
+    return FakeMemory
+
+
+_MINIMAL_CONFIG: "dict[str, Any]" = {
+    "version": "v1.1",
+    "vector_store": {"provider": "pgvector", "config": {}},
+    "llm": {
+        "provider": "openai",
+        "config": {"model": "gpt-5", "api_key": "test-key"},
+    },
+    "embedder": {"provider": "openai", "config": {"api_key": "test-key"}},
+    "history_db_path": "/tmp/history.db",
+}
+
+_SAMPLE_RECORDS: "dict[str, dict[str, Any]]" = {
+    "mem-r1": {
+        "id": "mem-r1",
+        "memory": "regression memory one",
+        "metadata": {"source": "chat"},
+    },
+    "mem-r2": {
+        "id": "mem-r2",
+        "memory": "regression memory two",
+        "metadata": {"source": "chat"},
+    },
+}
+
+
+def test_regression_search_result_retrieval_field_exact_shape(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression: every result in /search must carry a _retrieval dict with exactly
+    {stage, source, strategy} and no extra or missing keys.
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    FakeMemory = _make_fake_memory_class_with_records(_SAMPLE_RECORDS)
+    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+
+    with TestClient(app) as client:
+        assert client.post("/configure", json=_MINIMAL_CONFIG).status_code == 200
+
+        resp = client.post(
+            "/search",
+            json={"query": "regression", "user_id": "user-1"},
+        )
+
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert len(results) >= 1, "Expected at least one search result"
+
+    for result in results:
+        assert "_retrieval" in result, "Each search result must have _retrieval"
+        retrieval = result["_retrieval"]
+        assert isinstance(retrieval, dict), "_retrieval must be a dict"
+        # Exact required keys – no more, no less
+        assert set(retrieval.keys()) == {
+            "stage",
+            "source",
+            "strategy",
+        }, f"_retrieval keys mismatch: {set(retrieval.keys())}"
+        assert retrieval["stage"] == "semantic", (
+            f"Default search stage must be 'semantic', got {retrieval['stage']!r}"
+        )
+        assert retrieval["source"] == "memory_store", (
+            f"Default search source must be 'memory_store', got {retrieval['source']!r}"
+        )
+        assert retrieval["strategy"] == "semantic", (
+            f"Default search strategy must be 'semantic', got {retrieval['strategy']!r}"
+        )
+
+
+def test_regression_search_trace_retrieval_nested_field_contract(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression: /search response must contain trace.retrieval with specific keys and
+    value types that must not change between refactors.
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    FakeMemory = _make_fake_memory_class_with_records(_SAMPLE_RECORDS)
+    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+
+    with TestClient(app) as client:
+        assert client.post("/configure", json=_MINIMAL_CONFIG).status_code == 200
+
+        resp = client.post(
+            "/search",
+            headers={"X-Correlation-ID": "reg-trace-001"},
+            json={"query": "regression", "user_id": "user-1"},
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+
+    # Top-level trace key must exist
+    assert "trace" in payload, "Search response must include top-level 'trace'"
+    trace = payload["trace"]
+    assert isinstance(trace, dict), "'trace' must be a dict"
+
+    # trace.request_id must echo the correlation header
+    assert trace["request_id"] == "reg-trace-001", (
+        "trace.request_id must echo X-Correlation-ID header"
+    )
+
+    # trace.retrieval must be a dict with the required keys
+    assert "retrieval" in trace, "trace must include 'retrieval'"
+    r = trace["retrieval"]
+    assert isinstance(r, dict), "trace.retrieval must be a dict"
+
+    required_scalar_keys = {
+        "lexical_count",
+        "semantic_count",
+        "rerank_applied",
+    }
+    for key in required_scalar_keys:
+        assert key in r, f"trace.retrieval must include '{key}'"
+
+    assert isinstance(r["lexical_count"], int), "trace.retrieval.lexical_count is int"
+    assert isinstance(r["semantic_count"], int), "trace.retrieval.semantic_count is int"
+    assert isinstance(r["rerank_applied"], bool), "trace.retrieval.rerank_applied is bool"
+
+    # degraded sub-dict with three boolean keys
+    assert "degraded" in r, "trace.retrieval must include 'degraded'"
+    degraded = r["degraded"]
+    assert isinstance(degraded, dict), "trace.retrieval.degraded must be a dict"
+    for sub_key in ("lexical", "semantic", "rerank"):
+        assert sub_key in degraded, f"trace.retrieval.degraded must include '{sub_key}'"
+        assert isinstance(degraded[sub_key], bool), (
+            f"trace.retrieval.degraded.{sub_key} must be bool"
+        )
+
+    # latency_ms sub-dict with four float keys
+    assert "latency_ms" in r, "trace.retrieval must include 'latency_ms'"
+    latency = r["latency_ms"]
+    assert isinstance(latency, dict), "trace.retrieval.latency_ms must be a dict"
+    for lat_key in ("lexical", "semantic", "rerank", "total"):
+        assert lat_key in latency, f"trace.retrieval.latency_ms must include '{lat_key}'"
+        assert isinstance(latency[lat_key], float), (
+            f"trace.retrieval.latency_ms.{lat_key} must be float"
+        )
+
+
+def test_regression_retrieve_backend_capabilities_field_contract(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression: /retrieve response must carry backend_capabilities with exactly the
+    four boolean keys: lexical, semantic, rerank, anchors.
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    FakeMemory = _make_fake_memory_class_with_records(_SAMPLE_RECORDS)
+    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+
+    with TestClient(app) as client:
+        assert client.post("/configure", json=_MINIMAL_CONFIG).status_code == 200
+
+        resp = client.post(
+            "/retrieve",
+            json={
+                "query": "regression memory",
+                "scopes": ["project"],
+                "user_id": "user-1",
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+
+    assert "backend_capabilities" in payload, (
+        "/retrieve response must include 'backend_capabilities'"
+    )
+    caps = payload["backend_capabilities"]
+    assert isinstance(caps, dict), "backend_capabilities must be a dict"
+    assert set(caps.keys()) == {
+        "lexical",
+        "semantic",
+        "rerank",
+        "anchors",
+    }, f"backend_capabilities keys mismatch: {set(caps.keys())}"
+    for key, value in caps.items():
+        assert isinstance(value, bool), (
+            f"backend_capabilities.{key} must be bool, got {type(value)}"
+        )
+
+
+def test_regression_retrieve_degradation_reasons_is_empty_list_when_healthy(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression: when /retrieve completes without errors, degradation_reasons must be
+    an empty list and degraded must be False.
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    class FakeMemory:
+        def __init__(self, config: "dict[str, Any]") -> None:
+            self.config = config
+
+        def get_all(self, **_: "Any") -> "list[dict[str, Any]]":
+            return [
+                {
+                    "id": "mem-healthy",
+                    "memory": "regression healthy memory canonical retrieve",
+                    "metadata": {"source": "chat"},
+                }
+            ]
+
+        def search(self, *, query: str, **params: "Any") -> "dict[str, Any]":
+            return {
+                "results": [
+                    {
+                        "id": "mem-healthy",
+                        "memory": "regression healthy memory canonical retrieve",
+                        "metadata": {"source": "chat"},
+                        "score": 0.90,
+                    }
+                ]
+            }
+
+    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+
+    with TestClient(app) as client:
+        assert client.post("/configure", json=_MINIMAL_CONFIG).status_code == 200
+
+        resp = client.post(
+            "/retrieve",
+            json={
+                "query": "canonical retrieve",
+                "scopes": ["project"],
+                "user_id": "user-1",
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+
+    assert "degraded" in payload, "/retrieve response must include 'degraded'"
+    assert payload["degraded"] is False, (
+        "degraded must be False when no retrieval stage failed"
+    )
+
+    assert "degradation_reasons" in payload, (
+        "/retrieve response must include 'degradation_reasons'"
+    )
+    assert payload["degradation_reasons"] == [], (
+        "degradation_reasons must be empty list when healthy"
+    )
+
+
+def test_regression_retrieve_degradation_reasons_semantic_unavailable(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression: when semantic search throws, degradation_reasons must contain
+    'semantic_unavailable' and 'rerank_skipped', and degraded must be True.
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    class FakeMemory:
+        def __init__(self, config: "dict[str, Any]") -> None:
+            self.config = config
+
+        def get_all(self, **_: "Any") -> "list[dict[str, Any]]":
+            return [
+                {
+                    "id": "mem-lex-only",
+                    "memory": "regression semantic unavailable canonical retrieve",
+                    "metadata": {"source": "chat"},
+                }
+            ]
+
+        def search(self, **_: "Any") -> "Any":
+            raise RuntimeError("semantic backend down")
+
+    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+
+    with TestClient(app) as client:
+        assert client.post("/configure", json=_MINIMAL_CONFIG).status_code == 200
+
+        resp = client.post(
+            "/retrieve",
+            json={
+                "query": "canonical retrieve",
+                "scopes": ["project"],
+                "user_id": "user-1",
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+
+    assert payload["degraded"] is True
+    assert "semantic_unavailable" in payload["degradation_reasons"], (
+        "degradation_reasons must contain 'semantic_unavailable'"
+    )
+    assert "rerank_skipped" in payload["degradation_reasons"], (
+        "degradation_reasons must contain 'rerank_skipped'"
+    )
+    assert payload["backend_capabilities"]["semantic"] is False
+    assert payload["backend_capabilities"]["rerank"] is False
+    assert payload["backend_capabilities"]["lexical"] is True
+
+
+def test_regression_retrieve_result_retrieval_meta_field_contract(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression: each result in /retrieve must carry both 'retrieval' (summary) and
+    '_retrieval' (raw stage marker) with the expected keys.
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    class FakeMemory:
+        def __init__(self, config: "dict[str, Any]") -> None:
+            self.config = config
+
+        def get_all(self, **_: "Any") -> "list[dict[str, Any]]":
+            return [
+                {
+                    "id": "mem-contract",
+                    "memory": "regression result meta canonical retrieve",
+                    "metadata": {"source": "chat", "scope": "project"},
+                }
+            ]
+
+        def search(self, *, query: str, **params: "Any") -> "dict[str, Any]":
+            return {
+                "results": [
+                    {
+                        "id": "mem-contract",
+                        "memory": "regression result meta canonical retrieve",
+                        "metadata": {"source": "chat", "scope": "project"},
+                        "score": 0.88,
+                    }
+                ]
+            }
+
+    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+
+    with TestClient(app) as client:
+        assert client.post("/configure", json=_MINIMAL_CONFIG).status_code == 200
+
+        resp = client.post(
+            "/retrieve",
+            json={
+                "query": "canonical retrieve",
+                "scopes": ["project"],
+                "user_id": "user-1",
+            },
+        )
+
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert len(results) >= 1
+
+    for result in results:
+        # High-level retrieval summary block
+        assert "retrieval" in result, "Each /retrieve result must have 'retrieval'"
+        ret = result["retrieval"]
+        assert isinstance(ret, dict)
+        for key in ("matched_by", "lexical_score", "semantic_score", "reranked", "rank_position"):
+            assert key in ret, f"result.retrieval must include '{key}'"
+        assert isinstance(ret["matched_by"], list), "matched_by must be a list"
+        assert isinstance(ret["reranked"], bool), "reranked must be bool"
+        assert isinstance(ret["rank_position"], int), "rank_position must be int"
+
+        # Raw stage marker
+        assert "_retrieval" in result, "Each /retrieve result must have '_retrieval'"
+        raw = result["_retrieval"]
+        assert isinstance(raw, dict), "_retrieval must be a dict"
+        assert "stage" in raw, "_retrieval must include 'stage'"
+        assert raw["stage"] in ("semantic", "lexical", "hybrid"), (
+            f"_retrieval.stage must be semantic/lexical/hybrid, got {raw['stage']!r}"
+        )
+
+
+def test_regression_memory_crud_create_list_get_delete_response_shapes(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression: basic CRUD HTTP response shapes for /memories must stay stable.
+    Asserts status codes, id presence on create, list returns iterable, get returns
+    id, update reflects change, delete returns expected message.
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    FakeMemory = _make_fake_memory_class_with_records(dict(_SAMPLE_RECORDS))
+    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+
+    with TestClient(app) as client:
+        assert client.post("/configure", json=_MINIMAL_CONFIG).status_code == 200
+
+        # CREATE
+        create_resp = client.post(
+            "/memories",
+            json={
+                "messages": [{"role": "user", "content": "regression create test"}],
+                "user_id": "user-reg",
+            },
+        )
+        assert create_resp.status_code == 200
+        created = create_resp.json()
+        assert "id" in created, "Create response must include 'id'"
+
+        # LIST
+        list_resp = client.get("/memories", params={"user_id": "user-reg"})
+        assert list_resp.status_code == 200
+        listed = list_resp.json()
+        assert isinstance(listed, list), "List memories must return a JSON array"
+
+        # GET
+        get_resp = client.get("/memories/mem-r1")
+        assert get_resp.status_code == 200
+        gotten = get_resp.json()
+        assert gotten["id"] == "mem-r1", "Get memory must return correct id"
+
+        # UPDATE
+        update_resp = client.put(
+            "/memories/mem-r1", json={"memory": "regression updated"}
+        )
+        assert update_resp.status_code == 200
+        updated = update_resp.json()
+        assert updated["memory"] == "regression updated", (
+            "Update must reflect new memory value"
+        )
+
+        # DELETE single
+        delete_resp = client.delete("/memories/mem-r1")
+        assert delete_resp.status_code == 200
+        assert delete_resp.json() == {"message": "Memory deleted successfully"}, (
+            "Delete single must return exact message"
+        )
+
+        # DELETE all
+        delete_all_resp = client.delete("/memories", params={"user_id": "user-reg"})
+        assert delete_all_resp.status_code == 200
+        assert delete_all_resp.json() == {"message": "All relevant memories deleted"}, (
+            "Delete all must return exact message"
+        )
+
+        # RESET
+        reset_resp = client.post("/reset")
+        assert reset_resp.status_code == 200
+        assert reset_resp.json() == {"message": "All memories reset"}, (
+            "Reset must return exact message"
+        )
+
+
+def test_regression_retrieve_trace_retrieval_contains_backend_capabilities(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression: /retrieve trace.retrieval must carry a backend_capabilities sub-dict
+    mirroring the top-level backend_capabilities (all four boolean keys).
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    class FakeMemory:
+        def __init__(self, config: "dict[str, Any]") -> None:
+            self.config = config
+
+        def get_all(self, **_: "Any") -> "list[dict[str, Any]]":
+            return [
+                {
+                    "id": "mem-trace-caps",
+                    "memory": "retrieve trace capabilities regression canonical",
+                    "metadata": {"source": "chat"},
+                }
+            ]
+
+        def search(self, *, query: str, **params: "Any") -> "dict[str, Any]":
+            return {
+                "results": [
+                    {
+                        "id": "mem-trace-caps",
+                        "memory": "retrieve trace capabilities regression canonical",
+                        "metadata": {"source": "chat"},
+                        "score": 0.92,
+                    }
+                ]
+            }
+
+    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+
+    with TestClient(app) as client:
+        assert client.post("/configure", json=_MINIMAL_CONFIG).status_code == 200
+
+        resp = client.post(
+            "/retrieve",
+            headers={"X-Correlation-ID": "reg-caps-trace-001"},
+            json={
+                "query": "canonical trace caps",
+                "scopes": ["project"],
+                "user_id": "user-1",
+            },
+        )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+
+    assert "trace" in payload, "/retrieve response must have 'trace'"
+    trace = payload["trace"]
+    assert "retrieval" in trace, "/retrieve trace must have 'retrieval'"
+    trace_ret = trace["retrieval"]
+
+    assert "backend_capabilities" in trace_ret, (
+        "trace.retrieval must include 'backend_capabilities'"
+    )
+    caps_in_trace = trace_ret["backend_capabilities"]
+    assert set(caps_in_trace.keys()) == {
+        "lexical",
+        "semantic",
+        "rerank",
+        "anchors",
+    }, f"trace.retrieval.backend_capabilities keys mismatch: {set(caps_in_trace.keys())}"
+    for key, val in caps_in_trace.items():
+        assert isinstance(val, bool), (
+            f"trace.retrieval.backend_capabilities.{key} must be bool"
+        )
+
+    # Must mirror top-level backend_capabilities
+    assert caps_in_trace == payload["backend_capabilities"], (
+        "trace.retrieval.backend_capabilities must mirror top-level backend_capabilities"
+    )
+
+    # rerank_applied must also be present
+    assert "rerank_applied" in trace_ret, "trace.retrieval must include 'rerank_applied'"
+    assert isinstance(trace_ret["rerank_applied"], bool)
+
+
+def _make_app_no_live_deps(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    class FakeMemory:
+        def __init__(self, config):
+            self.config = config
+
+    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+    return app
+
+
+def test_query_capabilities_route_returns_expected_shape(monkeypatch):
+    app = _make_app_no_live_deps(monkeypatch)
+    with TestClient(app) as client:
+        resp = client.get("/query/capabilities")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "memory_store" in body
+    assert "file_corpus" in body
+    assert isinstance(body["memory_store"], dict)
+    assert isinstance(body["file_corpus"], dict)
+    assert "X-Correlation-ID" in resp.headers
+
+
+def test_index_status_route_returns_expected_shape(monkeypatch):
+    app = _make_app_no_live_deps(monkeypatch)
+    with TestClient(app) as client:
+        resp = client.get("/index/status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "roots" in body
+    assert "total_files" in body
+    assert "total_chunks" in body
+    assert "X-Correlation-ID" in resp.headers
+
+
+def test_index_reset_requires_confirm_true(monkeypatch):
+    app = _make_app_no_live_deps(monkeypatch)
+    with TestClient(app) as client:
+        resp = client.post("/index/reset", json={"confirm": False})
+    assert resp.status_code == 422
+
+
+def test_index_reset_succeeds_with_confirm_true(monkeypatch):
+    app = _make_app_no_live_deps(monkeypatch)
+    with TestClient(app) as client:
+        resp = client.post("/index/reset", json={"confirm": True})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "files_cleared" in body
+    assert "chunks_cleared" in body
+    assert "reset_at" in body
+    assert "X-Correlation-ID" in resp.headers
+
+
+def test_index_watch_start_stop_round_trip(monkeypatch, tmp_path):
+    app = _make_app_no_live_deps(monkeypatch)
+    root = str(tmp_path)
+    with TestClient(app) as client:
+        start_resp = client.post("/index/watch/start", json={"root": root})
+        assert start_resp.status_code == 200
+        assert start_resp.json()["watching"] is True
+        assert start_resp.json()["root"] == root
+
+        stop_resp = client.post("/index/watch/stop", json={"root": root})
+        assert stop_resp.status_code == 200
+        assert stop_resp.json()["watching"] is False
+        assert stop_resp.json()["root"] == root
+    assert "X-Correlation-ID" in start_resp.headers
+
+
+def test_index_sync_route_returns_expected_shape(monkeypatch, tmp_path):
+    app = _make_app_no_live_deps(monkeypatch)
+    root = str(tmp_path)
+    with TestClient(app) as client:
+        resp = client.post("/index/sync", json={"root": root})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["root"] == root
+    assert "files_indexed" in body
+    assert "chunks_indexed" in body
+    assert "synced_at" in body
+    assert "X-Correlation-ID" in resp.headers
+
+
+def test_unified_query_route_returns_expected_shape(monkeypatch):
+    app = _make_app_no_live_deps(monkeypatch)
+    with TestClient(app) as client:
+        resp = client.post("/query", json={"query": "hello world", "corpora": ["file_corpus"]})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "hits" in body
+    assert "total" in body
+    assert "corpora_queried" in body
+    assert "degraded" in body
+    assert "X-Correlation-ID" in resp.headers
+
+
+def test_unified_query_rejects_empty_query(monkeypatch):
+    app = _make_app_no_live_deps(monkeypatch)
+    with TestClient(app) as client:
+        resp = client.post("/query", json={"query": ""})
+    assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Tests for generate_summaries field and is_chunk_memory_enabled
+# ---------------------------------------------------------------------------
+
+def test_index_sync_accepts_generate_summaries_flag(monkeypatch):
+    app = _make_app_no_live_deps(monkeypatch)
+    with TestClient(app) as client:
+        resp = client.post("/index/sync", json={"root": "/tmp", "generate_summaries": True})
+    assert resp.status_code == 200
+
+
+def test_index_sync_legacy_payload_without_generate_summaries(monkeypatch):
+    app = _make_app_no_live_deps(monkeypatch)
+    with TestClient(app) as client:
+        resp = client.post("/index/sync", json={"root": "/tmp"})
+    assert resp.status_code == 200
+
+
+def test_use_chunk_memory_env_parsing(monkeypatch):
+    import importlib
+    runtime = importlib.import_module("services.runtime")
+
+    truthy_values = ["1", "true", "True", "TRUE", "yes", "Yes", "YES"]
+    for val in truthy_values:
+        monkeypatch.setenv("USE_CHUNK_MEMORY", val)
+        assert runtime.is_chunk_memory_enabled() is True, f"Expected True for {val!r}"
+
+    falsy_values = ["0", "false", "no", "off", "", "maybe"]
+    for val in falsy_values:
+        monkeypatch.setenv("USE_CHUNK_MEMORY", val)
+        assert runtime.is_chunk_memory_enabled() is False, f"Expected False for {val!r}"
+
+    monkeypatch.delenv("USE_CHUNK_MEMORY", raising=False)
+    assert runtime.is_chunk_memory_enabled() is False, "Expected False when unset"

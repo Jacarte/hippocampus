@@ -1,0 +1,206 @@
+from __future__ import annotations
+
+import logging
+import math
+import uuid
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+class FileCorpusService:
+    """In-memory file/doc chunk store, isolated from the mem0 Memory namespace."""
+
+    def __init__(self) -> None:
+        self._chunks: dict[str, dict[str, Any]] = {}
+
+    def upsert_chunks(
+        self,
+        root: str,
+        file_path: str,
+        chunks: list[dict[str, Any]],
+    ) -> None:
+        """Store chunks for *file_path* under *root*, replacing any previous chunks.
+
+        Each element of *chunks* may optionally carry:
+
+        - ``summary_text`` (``str | None``) — a human-readable summary of the
+          chunk's content, e.g. produced by an LLM.  Stored as-is; ``None``
+          when omitted.
+        - ``summary_embedding`` (``list[float] | None``) — a vector embedding
+          of ``summary_text`` for semantic search.  Stored as-is; ``None`` when
+          omitted.  Neither field is required; existing callers that do not
+          supply them continue to work unchanged.
+        """
+        self.delete_file(root, file_path)
+        for chunk in chunks:
+            chunk_id = str(chunk.get("id") or uuid.uuid4())
+            record: dict[str, Any] = {
+                "id": chunk_id,
+                "root": root,
+                "file_path": file_path,
+                "language": chunk.get("language"),
+                "symbol_name": chunk.get("symbol_name"),
+                "symbol_kind": chunk.get("symbol_kind"),
+                "line_start": chunk.get("line_start"),
+                "line_end": chunk.get("line_end"),
+                "content": chunk.get("content", ""),
+                "score": 0.0,
+                "summary_text": chunk.get("summary_text"),
+                "summary_embedding": chunk.get("summary_embedding"),
+            }
+            storage_key = f"{root}\x00{file_path}\x00{chunk_id}"
+            self._chunks[storage_key] = record
+
+    def delete_file(self, root: str, file_path: str) -> None:
+        prefix = f"{root}\x00{file_path}\x00"
+        keys_to_remove = [k for k in self._chunks if k.startswith(prefix)]
+        for key in keys_to_remove:
+            del self._chunks[key]
+
+    def query(
+        self,
+        query_text: str,
+        filters: dict[str, Any] | None = None,
+        limit: int = 10,
+        chunk_memory_enabled: bool = False,
+        query_embedding: list[float] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return chunks matching *query_text*.
+
+        When *chunk_memory_enabled* is ``True`` and *query_embedding* is
+        provided, the method also performs semantic similarity search against
+        stored ``summary_embedding`` fields.  Chunks that match either path
+        are merged; where a chunk qualifies under both paths the higher score
+        is kept.  Chunks without ``summary_embedding`` are silently skipped on
+        the semantic path.  If the semantic path raises an unexpected error the
+        method logs a warning and returns the lexical-only results so callers
+        are never left empty-handed.
+        """
+        lexical = self._lexical_query(query_text, filters=filters, limit=limit)
+
+        if not chunk_memory_enabled or query_embedding is None:
+            return lexical
+
+        try:
+            merged = self._merge_with_semantic(
+                lexical=lexical,
+                filters=filters,
+                query_embedding=query_embedding,
+                limit=limit,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("summary-backed retrieval failed, falling back to lexical: %s", exc)
+            return lexical
+
+        return merged
+
+    def query_with_summaries(
+        self,
+        query_embedding: list[float],
+        filters: dict[str, Any] | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Return chunks ranked by cosine similarity against *query_embedding*.
+
+        Only chunks that have a non-empty ``summary_embedding`` field are
+        considered.  Chunks without embeddings are skipped silently.
+        """
+        results: list[tuple[float, dict[str, Any]]] = []
+        for chunk in self._chunks.values():
+            embedding = chunk.get("summary_embedding")
+            if not embedding:
+                continue
+            if filters:
+                if not all(
+                    str(chunk.get(field)) == str(value)
+                    for field, value in filters.items()
+                ):
+                    continue
+            score = _cosine_similarity(query_embedding, embedding)
+            results.append((score, chunk))
+
+        results.sort(key=lambda t: t[0], reverse=True)
+        return [dict(chunk) | {"score": score} for score, chunk in results[:limit]]
+
+    def _lexical_query(
+        self,
+        query_text: str,
+        filters: dict[str, Any] | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        lowered_query = query_text.lower()
+
+        for chunk in self._chunks.values():
+            content: str = chunk.get("content") or ""
+            if lowered_query and lowered_query not in content.lower():
+                continue
+            if filters:
+                match = all(
+                    str(chunk.get(field)) == str(value)
+                    for field, value in filters.items()
+                )
+                if not match:
+                    continue
+            results.append(dict(chunk))
+            if len(results) >= limit:
+                break
+
+        return results
+
+    def _merge_with_semantic(
+        self,
+        lexical: list[dict[str, Any]],
+        filters: dict[str, Any] | None,
+        query_embedding: list[float],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        semantic = self.query_with_summaries(
+            query_embedding=query_embedding,
+            filters=filters,
+            limit=limit,
+        )
+
+        by_id: dict[str, dict[str, Any]] = {}
+        for chunk in lexical:
+            by_id[chunk["id"]] = dict(chunk)
+        for chunk in semantic:
+            chunk_id = chunk["id"]
+            if chunk_id in by_id:
+                by_id[chunk_id]["score"] = max(
+                    by_id[chunk_id].get("score", 0.0), chunk.get("score", 0.0)
+                )
+            else:
+                by_id[chunk_id] = dict(chunk)
+
+        merged = sorted(by_id.values(), key=lambda c: c.get("score", 0.0), reverse=True)
+        return merged[:limit]
+
+    def reset(self) -> dict[str, Any]:
+        cleared_count = len(self._chunks)
+        self._chunks.clear()
+        return {"cleared_chunks": cleared_count}
+
+    def get_status(self) -> dict[str, Any]:
+        root_counts: dict[str, int] = {}
+        file_set: set[str] = set()
+        for chunk in self._chunks.values():
+            root: str = chunk["root"]
+            root_counts[root] = root_counts.get(root, 0) + 1
+            file_set.add(f"{chunk['root']}\x00{chunk['file_path']}")
+
+        return {
+            "total_chunks": len(self._chunks),
+            "total_files": len(file_set),
+            "roots": root_counts,
+        }
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
