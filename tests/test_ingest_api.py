@@ -112,3 +112,30 @@ def test_ingest_missing_root_returns_422(monkeypatch: MonkeyPatch):
     }
     resp = client.post("/index/ingest", json=payload)
     assert resp.status_code == 422
+
+def test_ingest_with_project_id_namespaces_correctly(monkeypatch: MonkeyPatch):
+    app = _make_app(monkeypatch)
+    client = TestClient(app)
+
+    client.post("/index/ingest", json={
+        "root": "/machine-a/myproject",
+        "project_id": "proj-a",
+        "files": [{"file_path": "alpha.py", "content": "UNIQUE_ALPHA = True\n"}],
+    })
+
+    client.post("/index/ingest", json={
+        "root": "/machine-b/otherproject",
+        "project_id": "proj-b",
+        "files": [{"file_path": "beta.py", "content": "UNIQUE_BETA = True\n"}],
+    })
+
+    query_resp = client.post("/query", json={
+        "query": "UNIQUE_ALPHA",
+        "corpora": ["file_corpus"],
+        "limit": 10,
+    })
+    assert query_resp.status_code == 200
+    hits = query_resp.json()["hits"]
+    paths = [h["path"] for h in hits]
+    assert any("alpha.py" in p for p in paths)
+    assert not any("beta.py" in p for p in paths)

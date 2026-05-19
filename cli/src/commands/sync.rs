@@ -7,7 +7,7 @@ use walkdir::WalkDir;
 use crate::client::{build_client, post_json};
 use crate::output::print_json;
 
-pub fn run_sync(base_url: &str, path: &str, generate_summaries: bool) -> Result<()> {
+pub fn run_sync(base_url: &str, path: &str, generate_summaries: bool, project_id: Option<&str>) -> Result<()> {
     let root = Path::new(path)
         .canonicalize()
         .unwrap_or_else(|_| Path::new(path).to_path_buf());
@@ -48,11 +48,14 @@ pub fn run_sync(base_url: &str, path: &str, generate_summaries: bool) -> Result<
         return Ok(());
     }
 
-    let payload = json!({
+    let mut payload = json!({
         "root": root_str,
         "files": files,
         "generate_summaries": generate_summaries,
     });
+    if let Some(pid) = project_id {
+        payload["project_id"] = json!(pid);
+    }
 
     let client = build_client()?;
     let resp = post_json(&client, base_url, "index/ingest", &payload).map_err(|e| {
@@ -88,7 +91,7 @@ mod tests {
             .with_body(r#"{"files_indexed":1,"chunks_indexed":1,"ingested_at":"2024-01-01T00:00:00Z","errors":[]}"#)
             .create();
 
-        run_sync(&server.url(), dir.path().to_str().unwrap(), false).unwrap();
+        run_sync(&server.url(), dir.path().to_str().unwrap(), false, None).unwrap();
         mock.assert();
     }
 
@@ -103,7 +106,7 @@ mod tests {
             .with_body(r#"{"files_indexed":1,"chunks_indexed":1,"ingested_at":"2024-01-01T00:00:00Z","errors":[]}"#)
             .create();
 
-        run_sync(&server.url(), dir.path().to_str().unwrap(), false).unwrap();
+        run_sync(&server.url(), dir.path().to_str().unwrap(), false, None).unwrap();
         mock.assert();
     }
 
@@ -114,6 +117,7 @@ mod tests {
             "http://127.0.0.1:19996",
             dir.path().to_str().unwrap(),
             false,
+            None,
         );
         assert!(result.is_err());
     }
@@ -128,7 +132,7 @@ mod tests {
             .with_body(r#"{"detail":"internal error"}"#)
             .create();
 
-        let result = run_sync(&server.url(), dir.path().to_str().unwrap(), false);
+        let result = run_sync(&server.url(), dir.path().to_str().unwrap(), false, None);
         assert!(result.is_err());
     }
 
@@ -143,7 +147,25 @@ mod tests {
             .with_body(r#"{"files_indexed":1,"chunks_indexed":1,"ingested_at":"2024-01-01T00:00:00Z","errors":[]}"#)
             .create();
 
-        run_sync(&server.url(), dir.path().to_str().unwrap(), true).unwrap();
+        run_sync(&server.url(), dir.path().to_str().unwrap(), true, None).unwrap();
         mock.assert();
+    }
+
+    #[test]
+    fn test_sync_project_id_included_in_payload() {
+        let dir = make_temp_dir_with_file("d.rs", "fn bar() {}");
+        let mut server = Server::new();
+        let captured_body = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let captured_body_clone = captured_body.clone();
+        let mock = server
+            .mock("POST", "/index/ingest")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"files_indexed":1,"chunks_indexed":1,"ingested_at":"2024-01-01T00:00:00Z","errors":[]}"#)
+            .create();
+
+        run_sync(&server.url(), dir.path().to_str().unwrap(), false, Some("my-project")).unwrap();
+        mock.assert();
+        let _ = captured_body_clone;
     }
 }
