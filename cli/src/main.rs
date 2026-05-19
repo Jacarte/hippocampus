@@ -38,6 +38,9 @@ pub enum Commands {
         /// Directory to index (default: current directory)
         #[arg(default_value = ".")]
         path: String,
+        /// Generate LLM summaries for indexed chunks
+        #[arg(long)]
+        generate_summaries: bool,
         #[arg(long, short = 'u')]
         url: Option<String>,
     },
@@ -101,9 +104,9 @@ async fn main() -> anyhow::Result<()> {
                 raw,
             )?;
         }
-        Commands::Sync { path, url } => {
+        Commands::Sync { path, url, generate_summaries } => {
             let base = url.as_deref().map(|u| resolve_base_url(u)).unwrap_or_else(|| Config::from_env().base_url);
-            commands::sync::run_sync(&base, &path)?;
+            commands::sync::run_sync(&base, &path, generate_summaries)?;
         }
         Commands::Watch { path, stop, url } => {
             let base = url.as_deref().map(|u| resolve_base_url(u)).unwrap_or_else(|| Config::from_env().base_url);
