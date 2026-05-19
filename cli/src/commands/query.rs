@@ -78,20 +78,7 @@ pub fn run_query(
                         .get("line_start")
                         .map(|v| v.to_string())
                         .unwrap_or_else(|| "?".to_string());
-                    println!("[{}] FILE  score={:.3}  {}:{}", i + 1, score, path, line);
-                    if let Some(snippet) = hit.get("snippet").and_then(|v| v.as_str()) {
-                        let trimmed = snippet.trim();
-                        let first_line: String = trimmed
-                            .lines()
-                            .next()
-                            .unwrap_or("")
-                            .chars()
-                            .take(120)
-                            .collect();
-                        if !first_line.is_empty() {
-                            println!("     {}", first_line);
-                        }
-                    }
+                    println!("[{}] {}:{} score={:.3}", i + 1, path, line, score);
                 } else if hit_type == "memory_store" {
                     let content = hit
                         .get("content")
