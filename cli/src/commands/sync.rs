@@ -1,19 +1,61 @@
+use std::path::Path;
+
 use anyhow::Result;
-use serde_json::json;
+use serde_json::{json, Value};
+use walkdir::WalkDir;
 
 use crate::client::{build_client, post_json};
 use crate::output::print_json;
 
-/// Run the `sync` command: POST /index/sync with the given root path and print the JSON response.
-///
-/// # Arguments
-/// * `base_url` - Base URL of the mem0 server.
-/// * `path` - Root directory path to index.
-/// * `generate_summaries` - Whether to generate LLM summaries for indexed chunks.
 pub fn run_sync(base_url: &str, path: &str, generate_summaries: bool) -> Result<()> {
+    let root = Path::new(path)
+        .canonicalize()
+        .unwrap_or_else(|_| Path::new(path).to_path_buf());
+    let root_str = root.to_string_lossy().to_string();
+
+    let mut files: Vec<Value> = Vec::new();
+
+    for entry in WalkDir::new(&root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
+        let abs_path = entry.path();
+        let rel_path = abs_path
+            .strip_prefix(&root)
+            .unwrap_or(abs_path)
+            .to_string_lossy()
+            .to_string();
+
+        if rel_path.contains("/.") || rel_path.starts_with('.') {
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(abs_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        files.push(json!({
+            "file_path": rel_path,
+            "content": content,
+        }));
+    }
+
+    if files.is_empty() {
+        eprintln!("No readable files found in {path}");
+        return Ok(());
+    }
+
+    let payload = json!({
+        "root": root_str,
+        "files": files,
+        "generate_summaries": generate_summaries,
+    });
+
     let client = build_client()?;
-    let payload = json!({ "root": path, "generate_summaries": generate_summaries });
-    let resp = post_json(&client, base_url, "index/sync", &payload).map_err(|e| {
+    let resp = post_json(&client, base_url, "index/ingest", &payload).map_err(|e| {
         eprintln!("Error: {e}");
         e
     })?;
@@ -25,73 +67,83 @@ pub fn run_sync(base_url: &str, path: &str, generate_summaries: bool) -> Result<
 mod tests {
     use super::*;
     use mockito::Server;
+    use std::io::Write;
+
+    fn make_temp_dir_with_file(name: &str, content: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join(name);
+        let mut f = std::fs::File::create(&file_path).unwrap();
+        write!(f, "{content}").unwrap();
+        dir
+    }
 
     #[test]
-    fn test_sync_posts_to_index_sync_endpoint() {
+    fn test_sync_posts_to_index_ingest_endpoint() {
+        let dir = make_temp_dir_with_file("hello.txt", "hello world");
         let mut server = Server::new();
         let mock = server
-            .mock("POST", "/index/sync")
+            .mock("POST", "/index/ingest")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"status":"ok","indexed":5}"#)
+            .with_body(r#"{"files_indexed":1,"chunks_indexed":1,"ingested_at":"2024-01-01T00:00:00Z","errors":[]}"#)
             .create();
 
-        run_sync(&server.url(), "/tmp/myproject", false).unwrap();
+        run_sync(&server.url(), dir.path().to_str().unwrap(), false).unwrap();
         mock.assert();
     }
 
     #[test]
-    fn test_sync_payload_contains_root_field() {
+    fn test_sync_payload_contains_files_and_root_keys() {
+        let dir = make_temp_dir_with_file("main.rs", "fn main() {}");
         let mut server = Server::new();
         let mock = server
-            .mock("POST", "/index/sync")
+            .mock("POST", "/index/ingest")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"status":"ok"}"#)
-            .match_body(mockito::Matcher::Json(serde_json::json!({
-                "root": "/tmp/myproject",
-                "generate_summaries": false,
-            })))
+            .with_body(r#"{"files_indexed":1,"chunks_indexed":1,"ingested_at":"2024-01-01T00:00:00Z","errors":[]}"#)
             .create();
 
-        run_sync(&server.url(), "/tmp/myproject", false).unwrap();
+        run_sync(&server.url(), dir.path().to_str().unwrap(), false).unwrap();
         mock.assert();
     }
 
     #[test]
     fn test_sync_connection_error_returns_err() {
-        let result = run_sync("http://127.0.0.1:19996", "/tmp/project", false);
+        let dir = make_temp_dir_with_file("a.txt", "x");
+        let result = run_sync(
+            "http://127.0.0.1:19996",
+            dir.path().to_str().unwrap(),
+            false,
+        );
         assert!(result.is_err());
     }
 
     #[test]
     fn test_sync_http_error_returns_err() {
+        let dir = make_temp_dir_with_file("b.txt", "y");
         let mut server = Server::new();
         server
-            .mock("POST", "/index/sync")
+            .mock("POST", "/index/ingest")
             .with_status(500)
             .with_body(r#"{"detail":"internal error"}"#)
             .create();
 
-        let result = run_sync(&server.url(), "/tmp/project", false);
+        let result = run_sync(&server.url(), dir.path().to_str().unwrap(), false);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_sync_generate_summaries_forwarded() {
+        let dir = make_temp_dir_with_file("c.rs", "fn foo() {}");
         let mut server = Server::new();
         let mock = server
-            .mock("POST", "/index/sync")
+            .mock("POST", "/index/ingest")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"status":"ok"}"#)
-            .match_body(mockito::Matcher::Json(serde_json::json!({
-                "root": "/tmp/myproject",
-                "generate_summaries": true,
-            })))
+            .with_body(r#"{"files_indexed":1,"chunks_indexed":1,"ingested_at":"2024-01-01T00:00:00Z","errors":[]}"#)
             .create();
 
-        run_sync(&server.url(), "/tmp/myproject", true).unwrap();
+        run_sync(&server.url(), dir.path().to_str().unwrap(), true).unwrap();
         mock.assert();
     }
 }

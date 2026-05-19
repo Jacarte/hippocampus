@@ -13,6 +13,7 @@ from api_models import (
     CapabilitiesResponse,
     IndexResetRequest,
     IndexSyncRequest,
+    FileIngestRequest,
     MemoryCreate,
     RetrieveRequest,
     SearchRequest,
@@ -274,6 +275,17 @@ def create_app(
             lambda: request.app.state.indexing_service.sync(
                 sync_req.root,
                 generate_summaries=sync_req.generate_summaries,
+            ),
+        )
+
+    @app.post("/index/ingest", summary="Ingest file contents into the corpus")
+    def index_ingest(ingest_req: FileIngestRequest, request: Request) -> Any:
+        return _execute_service_call(
+            "index_ingest",
+            lambda: request.app.state.indexing_service.ingest(
+                root=ingest_req.root,
+                files=[f.model_dump() for f in ingest_req.files],
+                generate_summaries=ingest_req.generate_summaries,
             ),
         )
 
