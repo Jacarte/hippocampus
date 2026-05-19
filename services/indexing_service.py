@@ -58,8 +58,20 @@ class IndexingService:
     def sync(self, root: str, generate_summaries: bool = False) -> dict[str, Any]:
         """Synchronise *root* into the corpus and manifest.
 
+        Reads files directly from the server's local filesystem, so *root* must
+        be a path that is accessible to the server process.  This makes it
+        suitable only for co-located (same-machine) use.  For remote or
+        cross-machine indexing, use :meth:`ingest` instead, which accepts file
+        contents supplied by the caller rather than reading them from disk.
+
+        Unlike :meth:`ingest`, this method also handles deletions: files that
+        were previously indexed but are no longer present on disk are removed
+        from the corpus.  The namespace key is always *root* itself; there is no
+        ``project_id`` override here.
+
         Args:
-            root: Absolute path to the directory tree to index.
+            root: Absolute path to the directory tree to index.  Must be
+                accessible to the server process at call time.
             generate_summaries: When ``True`` and a memory instance is
                 available, call :class:`~services.summary_service.SummaryService`
                 for each indexed chunk and store the resulting

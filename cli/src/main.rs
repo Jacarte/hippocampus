@@ -45,10 +45,10 @@ pub enum Commands {
         /// Generate LLM summaries for indexed chunks
         #[arg(long)]
         generate_summaries: bool,
+        /// Server base URL (overrides MEM0_BASE_URL env var and config file)
         #[arg(long, short = 'u')]
         url: Option<String>,
     },
-    /// Start or stop watching a directory
     Watch {
         /// Directory to watch (default: current directory)
         #[arg(default_value = ".")]

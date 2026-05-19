@@ -7,6 +7,32 @@ use walkdir::WalkDir;
 use crate::client::{build_client, post_json};
 use crate::output::print_json;
 
+/// Walk *path* on the local filesystem and POST all readable file contents to
+/// the server's `/index/ingest` endpoint.
+///
+/// Unlike the legacy `/index/sync` endpoint (which required the server to read
+/// files directly), this function reads every file client-side and transmits
+/// the content in the request body, making it safe to use with a remote server
+/// that has no access to the client's filesystem.
+///
+/// Hidden files and directories (whose relative path contains a `/.` segment or
+/// starts with `.`) are silently skipped.  Binary files that cannot be decoded
+/// as UTF-8 are also skipped without error.  If no readable files are found,
+/// the function prints a warning and returns `Ok(())` without making a network
+/// request.
+///
+/// # Arguments
+/// * `base_url` - Base URL of the mem0 server (e.g. `http://localhost:7779`).
+/// * `path` - Root directory to walk.  Resolved to an absolute path before use;
+///   falls back to the literal string if canonicalization fails.
+/// * `generate_summaries` - When `true`, forwarded to the server as
+///   `"generate_summaries": true` in the JSON payload, requesting LLM chunk
+///   summaries.  Silently ignored by the server when memory is not configured.
+/// * `project_id` - Optional stable project identifier forwarded as
+///   `"project_id"` in the payload.  When `Some`, the server uses it as the
+///   corpus namespace instead of the resolved path, so chunks from the same
+///   project indexed from different machines stay together.  When `None`, the
+///   field is omitted and the server falls back to `root`.
 pub fn run_sync(base_url: &str, path: &str, generate_summaries: bool, project_id: Option<&str>) -> Result<()> {
     let root = Path::new(path)
         .canonicalize()
