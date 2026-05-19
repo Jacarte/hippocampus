@@ -270,6 +270,214 @@ To keep the docs aligned with the implemented backend, this README does not clai
 - any retrieval source beyond the existing memory store
 - any reranker dependency outside the current in-process heuristic default
 
+## mgrep CLI
+
+`mgrep_cli.py` is an HTTP command-line client for indexing a local file corpus and searching across it (and the memory store). The default backend URL is `http://localhost:8000`.
+
+### Index a directory
+
+Walk a directory tree and push every file into the backend corpus:
+
+```bash
+python mgrep_cli.py sync /path/to/project
+```
+
+`sync` is a one-shot operation — run it after a bulk checkout or initial setup. For ongoing changes, use `watch` instead.
+
+### Watch for file changes
+
+Start a background watcher that incrementally re-indexes files as they are saved:
+
+```bash
+python mgrep_cli.py watch /path/to/project
+```
+
+Stop it when you no longer need live re-indexing:
+
+```bash
+python mgrep_cli.py watch /path/to/project --stop
+```
+
+The watcher is useful during active development: edit a file, save it, and subsequent `query` calls reflect the change without a full `sync`.
+
+### Search
+
+Search across all corpora (files + memory) with a keyword or phrase:
+
+```bash
+python mgrep_cli.py query "authentication middleware"
+```
+
+Restrict results to the file corpus only and filter by language:
+
+```bash
+python mgrep_cli.py query "token refresh" --corpus files --language-filter python
+```
+
+Limit results and narrow by path prefix:
+
+```bash
+python mgrep_cli.py query "database connection" --limit 5 --path-filter src/db
+```
+
+Get raw JSON output (useful for scripting or piping to `jq`):
+
+```bash
+python mgrep_cli.py query "retry logic" --raw
+```
+
+**Corpus values:** `all` (default), `files`, `memory`.  
+**Limit range:** 1–50, default 10.
+
+### Check index status
+
+Inspect how many documents are indexed and the current backend state:
+
+```bash
+python mgrep_cli.py status
+```
+
+The response shows counts per corpus and any active watcher information.
+
+### Reset the index
+
+Wipe all indexed data. Without `--yes`, the command prompts for interactive confirmation:
+
+```bash
+python mgrep_cli.py reset
+```
+
+Skip the confirmation prompt:
+
+```bash
+python mgrep_cli.py reset --yes
+```
+
+### Custom backend URL
+
+All commands accept `--url` to target a non-default host or port:
+
+```bash
+python mgrep_cli.py status --url http://localhost:9000
+python mgrep_cli.py sync /path/to/project --url http://remote-host:8000
+python mgrep_cli.py query "search term" --url http://localhost:9000
+```
+
+## MCP Integration (OpenCode)
+
+The repository ships a JSON-RPC 2.0 MCP bridge that lets OpenCode agents search the file corpus and memory store without writing any HTTP calls directly.
+
+### Architecture
+
+```
+OpenCode agent
+    │  stdio (JSON-RPC 2.0)
+    ▼
+services/mcp_bridge.py   ← MCP bridge process
+    │  HTTP
+    ▼
+server.py (FastAPI)      ← mem0 REST backend
+```
+
+### Start the backend
+
+```bash
+uvicorn server:app --host 0.0.0.0 --port 8000 --workers 1
+```
+
+The backend must be running before any MCP tool call is made.
+
+### Start the MCP bridge
+
+```bash
+python3 -m services.mcp_bridge
+```
+
+The bridge reads JSON-RPC requests from stdin and writes responses to stdout. OpenCode manages this process automatically when the MCP server entry is present in `opencode.json`.
+
+### Register in opencode.json
+
+Add the following entry to the `"mcp"` section of your project or global `opencode.json`:
+
+```json
+{
+  "mcp": {
+    "mgrep": {
+      "type": "local",
+      "command": "python3",
+      "args": ["-m", "services.mcp_bridge"],
+      "environment": {
+        "MEM0_SERVER_URL": "http://localhost:8000"
+      }
+    }
+  }
+}
+```
+
+`MEM0_SERVER_URL` defaults to `http://localhost:8000` when omitted. Set it explicitly if you run the backend on a non-default host or port.
+
+### Available tools
+
+#### `mgrep_query`
+
+Search the memory store and/or file corpus with a natural-language or keyword query. Returns ranked hits.
+
+```json
+{
+  "query": "how does retrieval ranking work",
+  "corpora": ["file_corpus"],
+  "limit": 10,
+  "language_filter": "python"
+}
+```
+
+- `query` — required. Natural-language or keyword query.
+- `corpora` — optional. One or more of `"memory_store"`, `"file_corpus"`, `"all"`. Defaults to `["all"]`.
+- `limit` — optional. 1–50 results. Defaults to 10.
+- `path_filter` — optional. Prefix filter applied to file corpus results (e.g. `"services/"`).
+- `language_filter` — optional. Language name (e.g. `"python"`, `"typescript"`).
+
+#### `mgrep_sync`
+
+Index a directory into the file corpus so it can be searched with `mgrep_query`.
+
+```json
+{
+  "root": "/Users/javcab/mem0server"
+}
+```
+
+- `root` — required. Absolute path to the directory to index.
+
+#### `mgrep_status`
+
+Return the current state of the file corpus index: indexed roots, file count, and chunk count.
+
+```json
+{}
+```
+
+No arguments required.
+
+#### `mgrep_reset`
+
+Wipe all indexed files and chunks from the file corpus. **This operation is irreversible.**
+
+```json
+{
+  "confirm": true
+}
+```
+
+- `confirm` — required. Must be `true` to proceed. The reset is a no-op when `false`.
+
+### v1 scope
+
+- File corpus indexes **code and Markdown files only**.
+- Results are **ranked hits** — raw matching passages with relevance scores. The bridge does not synthesize, summarize, or answer questions.
+- `mgrep_reset` is **destructive and irreversible**. The index must be rebuilt with `mgrep_sync` afterwards.
+- The bridge does not expose the mem0 memory CRUD endpoints. Use the REST API directly for memory operations.
+
 ## License
 
 Based on original source: https://code.m3ta.dev/m3tam3re/nixpkgs/src/branch/master/pkgs/mem0/server.py
