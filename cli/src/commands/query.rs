@@ -14,6 +14,10 @@ use crate::output::{print_json, print_no_results};
 /// * `path_filter` - Optional file-path substring filter.
 /// * `language_filter` - Optional programming-language filter.
 /// * `scope_filter` - Optional code-scope filter.
+/// * `user_id` - Optional user identifier forwarded as `user_id` in the request
+///   payload.  When `Some`, the server scopes memory-corpus results to that
+///   user.  When `None`, the field is omitted and the server applies its
+///   default (no per-user scoping).
 /// * `raw` - When `true`, print raw JSON instead of formatted hits.
 pub fn run_query(
     base_url: &str,
@@ -23,6 +27,7 @@ pub fn run_query(
     path_filter: Option<&str>,
     language_filter: Option<&str>,
     scope_filter: Option<&str>,
+    user_id: Option<&str>,
     raw: bool,
 ) -> Result<()> {
     let client = build_client()?;
@@ -41,6 +46,9 @@ pub fn run_query(
     }
     if let Some(sf) = scope_filter {
         payload["scope_filter"] = json!(sf);
+    }
+    if let Some(uid) = user_id {
+        payload["user_id"] = json!(uid);
     }
 
     let resp = post_json(&client, base_url, "query", &payload)
@@ -108,6 +116,7 @@ pub fn run_query(
 }
 
 #[cfg(test)]
+#[cfg(test)]
 mod tests {
     use super::*;
     use mockito::Server;
@@ -126,7 +135,7 @@ mod tests {
             .with_body(hit_response(serde_json::json!([])))
             .create();
 
-        run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, false)
+        run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, false)
             .unwrap();
         mock.assert();
     }
@@ -146,7 +155,7 @@ mod tests {
             })))
             .create();
 
-        run_query(&server.url(), "hello", &["files".to_string()], 5, None, None, None, false)
+        run_query(&server.url(), "hello", &["files".to_string()], 5, None, None, None, None, false)
             .unwrap();
         mock.assert();
     }
@@ -175,6 +184,7 @@ mod tests {
             Some("src/"),
             None,
             None,
+            None,
             false,
         )
         .unwrap();
@@ -191,13 +201,13 @@ mod tests {
             .with_body(hit_response(serde_json::json!([])))
             .create();
 
-        let result = run_query(&server.url(), "nonexistent", &["all".to_string()], 10, None, None, None, false);
+        let result = run_query(&server.url(), "nonexistent", &["all".to_string()], 10, None, None, None, None, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_query_connection_error_returns_err() {
-        let result = run_query("http://127.0.0.1:19998", "hello", &["all".to_string()], 10, None, None, None, false);
+        let result = run_query("http://127.0.0.1:19998", "hello", &["all".to_string()], 10, None, None, None, None, false);
         assert!(result.is_err());
     }
 
@@ -210,7 +220,7 @@ mod tests {
             .with_body(r#"{"detail":"oops"}"#)
             .create();
 
-        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, false);
+        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, false);
         assert!(result.is_err());
     }
 
@@ -231,7 +241,7 @@ mod tests {
             .with_body(hit_response(hits))
             .create();
 
-        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, true);
+        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, true);
         assert!(result.is_ok());
     }
 
@@ -245,7 +255,68 @@ mod tests {
             .with_body(r#"{"status":"degraded"}"#)
             .create();
 
-        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, false);
+        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, false);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_query_user_id_forwarded() {
+        let mut server = Server::new();
+        let mock = server
+            .mock("POST", "/query")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(hit_response(serde_json::json!([])))
+            .match_body(mockito::Matcher::Json(serde_json::json!({
+                "query": "hello",
+                "corpora": ["all"],
+                "limit": 10,
+                "user_id": "alice",
+            })))
+            .create();
+
+        run_query(
+            &server.url(),
+            "hello",
+            &["all".to_string()],
+            10,
+            None,
+            None,
+            None,
+            Some("alice"),
+            false,
+        )
+        .unwrap();
+        mock.assert();
+    }
+
+    #[test]
+    fn test_query_without_user_id_omits_field() {
+        let mut server = Server::new();
+        let mock = server
+            .mock("POST", "/query")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(hit_response(serde_json::json!([])))
+            .match_body(mockito::Matcher::Json(serde_json::json!({
+                "query": "hello",
+                "corpora": ["all"],
+                "limit": 10,
+            })))
+            .create();
+
+        run_query(
+            &server.url(),
+            "hello",
+            &["all".to_string()],
+            10,
+            None,
+            None,
+            None,
+            None,
+            false,
+        )
+        .unwrap();
+        mock.assert();
     }
 }
