@@ -30,6 +30,9 @@ pub enum Commands {
         language_filter: Option<String>,
         #[arg(long)]
         scope_filter: Option<String>,
+        /// Scope memory-corpus results to a specific user identifier.
+        #[arg(long)]
+        user_id: Option<String>,
         #[arg(long)]
         raw: bool,
     },
@@ -100,6 +103,7 @@ async fn main() -> anyhow::Result<()> {
             path_filter,
             language_filter,
             scope_filter,
+            user_id,
             raw,
         } => {
             let base = resolve_base_url(&url);
@@ -111,6 +115,7 @@ async fn main() -> anyhow::Result<()> {
                 path_filter.as_deref(),
                 language_filter.as_deref(),
                 scope_filter.as_deref(),
+                user_id.as_deref(),
                 raw,
             )?;
         }
