@@ -266,6 +266,7 @@ def create_app(
                 scope_filter=query_req.scope_filter,
                 chunk_memory_enabled=chunk_memory_enabled,
                 memory_instance=memory_instance,
+                user_id=query_req.user_id,
             ),
         )
 

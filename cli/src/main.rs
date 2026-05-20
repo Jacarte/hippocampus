@@ -107,6 +107,7 @@ async fn main() -> anyhow::Result<()> {
             raw,
         } => {
             let base = resolve_base_url(&url);
+            let resolved_user_id = config::resolve_user_id(user_id.as_deref());
             commands::query::run_query(
                 &base,
                 &query,
@@ -115,7 +116,7 @@ async fn main() -> anyhow::Result<()> {
                 path_filter.as_deref(),
                 language_filter.as_deref(),
                 scope_filter.as_deref(),
-                user_id.as_deref(),
+                Some(&resolved_user_id),
                 raw,
             )?;
         }

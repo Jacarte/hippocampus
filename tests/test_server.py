@@ -1905,6 +1905,7 @@ def test_regression_retrieve_trace_retrieval_contains_backend_capabilities(
 
 def _make_app_no_live_deps(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    importlib.reload(importlib.import_module("api_models"))
     server = importlib.import_module("server")
     server = importlib.reload(server)
 
@@ -2120,3 +2121,46 @@ def test_index_file_route_respects_include_embeddings(monkeypatch, tmp_path):
         # summary_embedding present (may be None if none generated, but key exists)
         assert "summary_embedding" in chunk
         assert "has_summary_embedding" not in chunk
+
+
+def test_unified_query_forwards_user_id_to_query_service(monkeypatch):
+    """user_id from the request payload must reach query_service.query()."""
+    app = _make_app_no_live_deps(monkeypatch)
+    captured = {}
+
+    def fake_query(**kwargs):
+        captured.update(kwargs)
+        return {"hits": [], "total": 0, "corpora_queried": [], "degraded": False, "degradation_reasons": []}
+
+    with TestClient(app) as client:
+        client.app.state.query_service.query = fake_query
+        resp = client.post("/query", json={
+            "query": "hello",
+            "corpora": ["all"],
+            "limit": 5,
+            "user_id": "alice",
+        })
+
+    assert resp.status_code == 200
+    assert captured.get("user_id") == "alice", (
+        f"expected user_id='alice' forwarded to query_service.query, got: {captured}"
+    )
+
+
+def test_unified_query_omits_user_id_when_not_provided(monkeypatch):
+    """When user_id is absent from the request, None is forwarded."""
+    app = _make_app_no_live_deps(monkeypatch)
+    captured = {}
+
+    def fake_query(**kwargs):
+        captured.update(kwargs)
+        return {"hits": [], "total": 0, "corpora_queried": [], "degraded": False, "degradation_reasons": []}
+
+    with TestClient(app) as client:
+        client.app.state.query_service.query = fake_query
+        resp = client.post("/query", json={"query": "hello"})
+
+    assert resp.status_code == 200
+    assert captured.get("user_id") is None, (
+        f"expected user_id=None when not provided, got: {captured}"
+    )
