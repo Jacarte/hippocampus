@@ -30,6 +30,9 @@ pub enum Commands {
         language_filter: Option<String>,
         #[arg(long)]
         scope_filter: Option<String>,
+        /// Scope memory-corpus results to a specific user identifier.
+        #[arg(long)]
+        user_id: Option<String>,
         #[arg(long)]
         raw: bool,
     },
@@ -53,14 +56,20 @@ pub enum Commands {
         /// Directory to watch (default: current directory)
         #[arg(default_value = ".")]
         path: String,
-        /// Stop watching instead of starting
-        #[arg(long)]
-        stop: bool,
         #[arg(long, short = 'u')]
         url: Option<String>,
     },
     /// Show indexing status
     Status {
+        /// Show chunks for a specific file instead of aggregate stats
+        #[arg(long)]
+        file: Option<String>,
+        /// Root namespace to scope --file query
+        #[arg(long)]
+        root: Option<String>,
+        /// Include raw summary_embedding vectors in --file output
+        #[arg(long)]
+        embeddings: bool,
         #[arg(long, short = 'u', default_value = "")]
         url: String,
     },
@@ -94,9 +103,11 @@ async fn main() -> anyhow::Result<()> {
             path_filter,
             language_filter,
             scope_filter,
+            user_id,
             raw,
         } => {
             let base = resolve_base_url(&url);
+            let resolved_user_id = config::resolve_user_id(user_id.as_deref());
             commands::query::run_query(
                 &base,
                 &query,
@@ -105,6 +116,7 @@ async fn main() -> anyhow::Result<()> {
                 path_filter.as_deref(),
                 language_filter.as_deref(),
                 scope_filter.as_deref(),
+                Some(&resolved_user_id),
                 raw,
             )?;
         }
@@ -112,17 +124,17 @@ async fn main() -> anyhow::Result<()> {
             let base = url.as_deref().map(|u| resolve_base_url(u)).unwrap_or_else(|| Config::from_env().base_url);
             commands::sync::run_sync(&base, &path, generate_summaries, project_id.as_deref())?;
         }
-        Commands::Watch { path, stop, url } => {
+        Commands::Watch { path, url } => {
             let base = url.as_deref().map(|u| resolve_base_url(u)).unwrap_or_else(|| Config::from_env().base_url);
-            if stop {
-                commands::watch::run_watch_stop(&base, &path)?;
-            } else {
-                commands::watch::run_watch_start(&base, &path)?;
-            }
+            commands::watch::run_watch_start(&base, &path)?;
         }
-        Commands::Status { url } => {
+        Commands::Status { file, root, embeddings, url } => {
             let base = resolve_base_url(&url);
-            commands::status::run_status(&base)?;
+            if let Some(file_path) = file {
+                commands::status::run_file_status(&base, &file_path, root.as_deref(), embeddings)?;
+            } else {
+                commands::status::run_status(&base)?;
+            }
         }
         Commands::Reset { yes, url } => {
             let base = url.as_deref().map(|u| resolve_base_url(u)).unwrap_or_else(|| Config::from_env().base_url);

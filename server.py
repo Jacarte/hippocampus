@@ -11,6 +11,7 @@ from mem0 import Memory
 
 from api_models import (
     CapabilitiesResponse,
+    FileChunksRequest,
     IndexResetRequest,
     IndexSyncRequest,
     FileIngestRequest,
@@ -265,6 +266,7 @@ def create_app(
                 scope_filter=query_req.scope_filter,
                 chunk_memory_enabled=chunk_memory_enabled,
                 memory_instance=memory_instance,
+                user_id=query_req.user_id,
             ),
         )
 
@@ -327,6 +329,17 @@ def create_app(
         return _execute_service_call(
             "index_status",
             lambda: request.app.state.indexing_service.status(),
+        )
+
+    @app.post("/index/file", summary="Get all indexed chunks for a specific file")
+    def index_file_chunks(req: FileChunksRequest, request: Request) -> Any:
+        return _execute_service_call(
+            "index_file_chunks",
+            lambda: request.app.state.indexing_service.file_chunks(
+                file_path=req.file_path,
+                root=req.root,
+                include_embeddings=req.include_embeddings,
+            ),
         )
 
     @app.post("/index/reset", summary="Reset the file corpus index")

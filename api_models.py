@@ -78,6 +78,13 @@ class UnifiedQueryRequest(BaseModel):
     path_filter: str | None = None
     language_filter: str | None = None
     scope_filter: str | None = None
+    user_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional user identifier forwarded to the memory corpus for "
+            "per-user scoping.  When omitted the server applies no user filter."
+        ),
+    )
 
 
 class UnifiedQueryResponse(BaseModel):
@@ -192,5 +199,25 @@ class FileIngestRequest(BaseModel):
         description=(
             "When True, generate LLM summaries for each indexed chunk "
             "(requires memory to be configured)."
+        ),
+    )
+
+
+class FileChunksRequest(BaseModel):
+    file_path: str = Field(
+        description="Relative file path as stored in the index (e.g. 'src/main.rs').",
+    )
+    root: str | None = Field(
+        default=None,
+        description=(
+            "Root namespace to scope the query. "
+            "When omitted, chunks from all roots are returned."
+        ),
+    )
+    include_embeddings: bool = Field(
+        default=False,
+        description=(
+            "When True, include raw summary_embedding vectors in the response. "
+            "When False (default), each chunk carries a boolean has_summary_embedding instead."
         ),
     )
