@@ -78,6 +78,13 @@ class UnifiedQueryRequest(BaseModel):
     path_filter: str | None = None
     language_filter: str | None = None
     scope_filter: str | None = None
+    user_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional user identifier forwarded to the memory corpus for "
+            "per-user scoping.  When omitted the server applies no user filter."
+        ),
+    )
 
 
 class UnifiedQueryResponse(BaseModel):
