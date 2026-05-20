@@ -206,6 +206,35 @@ class FileCorpusService:
         merged = sorted(by_id.values(), key=lambda c: c.get("score", 0.0), reverse=True)
         return merged[:limit]
 
+    def get_file_chunks(
+        self,
+        root: str,
+        file_path: str,
+        include_embeddings: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return all stored chunks for *file_path* under *root*, sorted by line_start.
+
+        When *include_embeddings* is False, ``summary_embedding`` is replaced by
+        a boolean ``has_summary_embedding`` field.  When True, the raw vector is
+        included as-is.  The ``score`` field is always removed — it is 0.0 for
+        stored chunks and meaningless outside a query context.
+
+        Returns an empty list when no chunks exist for the given (root, file_path) pair.
+        """
+        prefix = f"{root}\x00{file_path}\x00"
+        chunks = [
+            dict(c) for key, c in self._chunks.items()
+            if key.startswith(prefix)
+        ]
+        chunks.sort(key=lambda c: (c.get("line_start") is None, c.get("line_start") or 0))
+        for chunk in chunks:
+            chunk.pop("score", None)
+            if not include_embeddings:
+                has_emb = bool(chunk.get("summary_embedding"))
+                del chunk["summary_embedding"]
+                chunk["has_summary_embedding"] = has_emb
+        return chunks
+
     def reset(self) -> dict[str, Any]:
         cleared_count = len(self._chunks)
         self._chunks.clear()

@@ -63,6 +63,9 @@ pub fn run_sync(base_url: &str, path: &str, generate_summaries: bool, project_id
             Err(_) => continue,
         };
 
+        // logging the ingestion of the file
+        eprintln!("Indexing file: {rel_path}");
+
         files.push(json!({
             "file_path": rel_path,
             "content": content,
@@ -72,6 +75,10 @@ pub fn run_sync(base_url: &str, path: &str, generate_summaries: bool, project_id
     if files.is_empty() {
         eprintln!("No readable files found in {path}");
         return Ok(());
+    }
+
+    if generate_summaries {
+        eprintln!("Requesting LLM summaries for indexed chunks");
     }
 
     let mut payload = json!({
@@ -181,17 +188,17 @@ mod tests {
     fn test_sync_project_id_included_in_payload() {
         let dir = make_temp_dir_with_file("d.rs", "fn bar() {}");
         let mut server = Server::new();
-        let captured_body = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-        let captured_body_clone = captured_body.clone();
         let mock = server
             .mock("POST", "/index/ingest")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{"files_indexed":1,"chunks_indexed":1,"ingested_at":"2024-01-01T00:00:00Z","errors":[]}"#)
+            .match_body(mockito::Matcher::PartialJson(serde_json::json!({
+                "project_id": "my-project",
+            })))
             .create();
 
         run_sync(&server.url(), dir.path().to_str().unwrap(), false, Some("my-project")).unwrap();
         mock.assert();
-        let _ = captured_body_clone;
     }
 }
