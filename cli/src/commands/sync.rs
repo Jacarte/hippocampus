@@ -7,6 +7,8 @@ use walkdir::WalkDir;
 use crate::client::{build_client, post_json};
 use crate::output::print_json;
 
+const MAX_FILE_BYTES: u64 = 500 * 1024; // 500 KB
+
 /// Walk *path* on the local filesystem and POST all readable file contents to
 /// the server's `/index/ingest` endpoint.
 ///
