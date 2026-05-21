@@ -138,6 +138,9 @@ def initialize_memory(app: FastAPI, config: dict[str, Any] | None = None) -> Any
     memory_instance = build_memory_instance(resolved_config, app.state.memory_factory)
     app.state.memory = memory_instance
     app.state.memory_config = resolved_config
+    indexing_service = getattr(app.state, "indexing_service", None)
+    if indexing_service is not None and hasattr(indexing_service, "set_memory_instance"):
+        indexing_service.set_memory_instance(memory_instance)
     return memory_instance
 
 
