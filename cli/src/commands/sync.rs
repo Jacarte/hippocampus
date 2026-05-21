@@ -208,4 +208,13 @@ mod tests {
         run_sync(&server.url(), dir.path().to_str().unwrap(), false, Some("my-project")).unwrap();
         mock.assert();
     }
+
+    #[test]
+    fn test_sync_skips_file_over_500kb() {
+        let dir = tempfile::tempdir().unwrap();
+        let big_path = dir.path().join("big.txt");
+        std::fs::write(&big_path, "x".repeat(500 * 1024 + 1)).unwrap();
+        let result = run_sync("http://127.0.0.1:19996", dir.path().to_str().unwrap(), false, None);
+        assert!(result.is_ok());
+    }
 }
