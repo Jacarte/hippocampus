@@ -2164,3 +2164,30 @@ def test_unified_query_omits_user_id_when_not_provided(monkeypatch):
     assert captured.get("user_id") is None, (
         f"expected user_id=None when not provided, got: {captured}"
     )
+
+
+def test_initialize_memory_propagates_to_indexing_service(monkeypatch: MonkeyPatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    class FakeMemory:
+        def __init__(self, config):
+            self.config = config
+
+    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+
+    assert app.state.indexing_service._memory is None
+
+    config = {
+        "version": "v1.1",
+        "vector_store": {"provider": "pgvector", "config": {}},
+        "llm": {"provider": "openai", "config": {"model": "gpt-5", "api_key": "k"}},
+        "embedder": {"provider": "openai", "config": {"api_key": "k"}},
+        "history_db_path": "/tmp/history.db",
+    }
+    server.initialize_memory(app, config=config)
+
+    assert app.state.indexing_service._memory is app.state.memory
+    assert isinstance(app.state.indexing_service._memory, FakeMemory)

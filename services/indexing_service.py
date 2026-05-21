@@ -55,6 +55,20 @@ class IndexingService:
         self._scanner = scanner
         self._memory = memory_instance
 
+    def set_memory_instance(self, memory_instance: Any | None) -> None:
+        """Attach or replace the memory instance used for summary generation.
+
+        Called automatically by :func:`~services.runtime.initialize_memory`
+        after the server memory is initialised or reconfigured.  When ``None``,
+        summary generation is silently skipped even if
+        ``generate_summaries=True``.
+
+        Args:
+            memory_instance: A configured mem0 ``Memory`` object, or ``None``
+                to disable summary generation.
+        """
+        self._memory = memory_instance
+
     def sync(self, root: str, generate_summaries: bool = False) -> dict[str, Any]:
         """Synchronise *root* into the corpus and manifest.
 
@@ -121,6 +135,11 @@ class IndexingService:
                     language = _EXT_TO_LANG.get(ext, "unknown")
                     chunks = CodeChunker().chunk(file_path, content, language)
 
+                if generate_summaries and self._memory is None:
+                    logger.warning(
+                        "generate_summaries=True but memory instance is not configured; "
+                        "chunks will be indexed without summaries."
+                    )
                 if generate_summaries and self._memory is not None:
                     summary_svc = SummaryService(self._memory)
                     for chunk in chunks:
@@ -214,6 +233,11 @@ class IndexingService:
                     language = _EXT_TO_LANG.get(ext, "unknown")
                     chunks = CodeChunker().chunk(file_path, content, language)
 
+                if generate_summaries and self._memory is None:
+                    logger.warning(
+                        "generate_summaries=True but memory instance is not configured; "
+                        "chunks will be indexed without summaries."
+                    )
                 if generate_summaries and self._memory is not None:
                     summary_svc = SummaryService(self._memory)
                     for chunk in chunks:
