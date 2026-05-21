@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -24,6 +25,19 @@ def _make_app(monkeypatch: MonkeyPatch):
     return server.create_app(memory_factory=FakeMemory, startup_enabled=False)
 
 
+def _ingest_wait(client, payload: dict, timeout: float = 10.0) -> dict:
+    resp = client.post("/index/ingest", json=payload)
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        job = client.get(f"/index/jobs/{job_id}").json()
+        if job["status"] == "completed":
+            return job["result"]
+        time.sleep(0.05)
+    raise TimeoutError(f"ingest job {job_id} did not complete within {timeout}s")
+
+
 def test_ingest_single_file_returns_files_indexed(monkeypatch: MonkeyPatch):
     app = _make_app(monkeypatch)
     client = TestClient(app)
@@ -35,9 +49,7 @@ def test_ingest_single_file_returns_files_indexed(monkeypatch: MonkeyPatch):
         ],
         "generate_summaries": False,
     }
-    resp = client.post("/index/ingest", json=payload)
-    assert resp.status_code == 200
-    data = resp.json()
+    data = _ingest_wait(client, payload)
     assert data["files_indexed"] == 1
     assert data["root"] == "/client/myproject"
     assert "ingested_at" in data
@@ -55,9 +67,7 @@ def test_ingest_multiple_files(monkeypatch: MonkeyPatch):
             {"file_path": "b.py", "content": "y = 2\n"},
         ],
     }
-    resp = client.post("/index/ingest", json=payload)
-    assert resp.status_code == 200
-    data = resp.json()
+    data = _ingest_wait(client, payload)
     assert data["files_indexed"] == 2
 
 
@@ -74,9 +84,8 @@ def test_ingest_then_query_returns_hit(monkeypatch: MonkeyPatch):
             }
         ],
     }
-    ingest_resp = client.post("/index/ingest", json=ingest_payload)
-    assert ingest_resp.status_code == 200
-    assert ingest_resp.json()["files_indexed"] == 1
+    data = _ingest_wait(client, ingest_payload)
+    assert data["files_indexed"] == 1
 
     query_payload = {
         "query": "compute_hash",
@@ -179,7 +188,15 @@ def test_ingest_with_generate_summaries_and_memory_stores_summary_fields(
     }
     resp = client.post("/index/ingest", json=payload)
     assert resp.status_code == 200
-    data = resp.json()
+    job_id = resp.json()["job_id"]
+    import time as _time
+    deadline = _time.time() + 10.0
+    while _time.time() < deadline:
+        job = client.get(f"/index/jobs/{job_id}").json()
+        if job["status"] == "completed":
+            break
+        _time.sleep(0.05)
+    data = job["result"]
     assert data["files_indexed"] == 1
 
     chunks_resp = client.post(

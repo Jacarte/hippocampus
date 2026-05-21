@@ -2,6 +2,7 @@ import importlib
 import json
 import logging
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -1982,13 +1983,23 @@ def test_index_sync_route_returns_expected_shape(monkeypatch, tmp_path):
     root = str(tmp_path)
     with TestClient(app) as client:
         resp = client.post("/index/sync", json={"root": root})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["root"] == root
-    assert "files_indexed" in body
-    assert "chunks_indexed" in body
-    assert "synced_at" in body
-    assert "X-Correlation-ID" in resp.headers
+        assert resp.status_code == 200
+        job = resp.json()
+        assert "job_id" in job
+        assert job["status"] in ("queued", "running", "completed")
+        assert "X-Correlation-ID" in resp.headers
+        job_id = job["job_id"]
+        deadline = time.time() + 10.0
+        while time.time() < deadline:
+            job = client.get(f"/index/jobs/{job_id}").json()
+            if job["status"] == "completed":
+                break
+            time.sleep(0.05)
+        result = job["result"]
+    assert result["root"] == root
+    assert "files_indexed" in result
+    assert "chunks_indexed" in result
+    assert "synced_at" in result
 
 
 def test_unified_query_route_returns_expected_shape(monkeypatch):
@@ -2081,6 +2092,12 @@ def test_index_file_route_returns_chunks_after_sync(monkeypatch, tmp_path):
     with TestClient(app) as client:
         sync_resp = client.post("/index/sync", json={"root": str(tmp_path)})
         assert sync_resp.status_code == 200
+        job_id = sync_resp.json()["job_id"]
+        deadline = time.time() + 10.0
+        while time.time() < deadline:
+            if client.get(f"/index/jobs/{job_id}").json()["status"] == "completed":
+                break
+            time.sleep(0.05)
 
         resp = client.post("/index/file", json={"file_path": "hello.py", "root": str(tmp_path)})
 
@@ -2110,7 +2127,13 @@ def test_index_file_route_respects_include_embeddings(monkeypatch, tmp_path):
     (tmp_path / "a.py").write_text("def foo(): pass\n")
 
     with TestClient(app) as client:
-        client.post("/index/sync", json={"root": str(tmp_path)})
+        sync_resp = client.post("/index/sync", json={"root": str(tmp_path)})
+        job_id = sync_resp.json()["job_id"]
+        deadline = time.time() + 10.0
+        while time.time() < deadline:
+            if client.get(f"/index/jobs/{job_id}").json()["status"] == "completed":
+                break
+            time.sleep(0.05)
         resp = client.post(
             "/index/file",
             json={"file_path": "a.py", "root": str(tmp_path), "include_embeddings": True},

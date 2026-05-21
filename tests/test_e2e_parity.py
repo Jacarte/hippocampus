@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -27,6 +28,19 @@ def _make_app(monkeypatch: MonkeyPatch) -> Any:
             self.config = config
 
     return server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+
+
+def _sync_wait(client: Any, root: str, timeout: float = 10.0) -> None:
+    resp = client.post("/index/sync", json={"root": root})
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        job = client.get(f"/index/jobs/{job_id}").json()
+        if job["status"] == "completed":
+            return
+        time.sleep(0.05)
+    raise TimeoutError(f"sync job {job_id} did not complete within {timeout}s")
 
 
 def _requests_fake_post(client: TestClient):
@@ -131,14 +145,24 @@ class TestCapabilitiesStatusParity:
 
 class TestSyncParity:
     def test_http_sync_indexes_fixture_root(self, monkeypatch: MonkeyPatch) -> None:
+        import time
         app = _make_app(monkeypatch)
         with TestClient(app) as client:
             resp = client.post("/index/sync", json={"root": _FIXTURES_ROOT})
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["root"] == _FIXTURES_ROOT
-        assert body["files_indexed"] >= 2
-        assert body["chunks_indexed"] >= 2
+            assert resp.status_code == 200
+            job_id = resp.json()["job_id"]
+            deadline = time.time() + 10.0
+            job_resp = None
+            while time.time() < deadline:
+                job_resp = client.get(f"/index/jobs/{job_id}")
+                if job_resp.json()["status"] == "completed":
+                    break
+                time.sleep(0.05)
+        assert job_resp is not None
+        result = job_resp.json()["result"]
+        assert result["root"] == _FIXTURES_ROOT
+        assert result["files_indexed"] >= 2
+        assert result["chunks_indexed"] >= 2
 
 
 
@@ -167,7 +191,7 @@ class TestStatusParity:
 
         app = _make_app(monkeypatch)
         with TestClient(app) as client:
-            client.post("/index/sync", json={"root": _FIXTURES_ROOT})
+            _sync_wait(client, _FIXTURES_ROOT)
             http_body = client.get("/index/status").json()
 
             with monkeypatch.context() as m:
@@ -195,7 +219,7 @@ class TestQueryParity:
 
         app = _make_app(monkeypatch)
         with TestClient(app) as client:
-            client.post("/index/sync", json={"root": _FIXTURES_ROOT})
+            _sync_wait(client, _FIXTURES_ROOT)
 
             http_hits = client.post(
                 "/query",
@@ -227,7 +251,7 @@ class TestQueryParity:
 
         app = _make_app(monkeypatch)
         with TestClient(app) as client:
-            client.post("/index/sync", json={"root": _FIXTURES_ROOT})
+            _sync_wait(client, _FIXTURES_ROOT)
 
             http_hits = client.post(
                 "/query",
@@ -263,7 +287,7 @@ class TestQueryParity:
 
         app = _make_app(monkeypatch)
         with TestClient(app) as client:
-            client.post("/index/sync", json={"root": _FIXTURES_ROOT})
+            _sync_wait(client, _FIXTURES_ROOT)
 
             http_paths = {
                 h["path"]

@@ -24,6 +24,7 @@ fn ingest_file(
     base_url: &str,
     root: &Path,
     abs_path: &Path,
+    generate_summaries: bool,
 ) -> Result<()> {
     let rel_path = abs_path
         .strip_prefix(root)
@@ -45,7 +46,7 @@ fn ingest_file(
     let payload = json!({
         "root": root_str,
         "files": [{"file_path": rel_path, "content": content}],
-        "generate_summaries": false,
+        "generate_summaries": generate_summaries,
     });
 
     post_json(client, base_url, "index/ingest", &payload)?;
@@ -60,7 +61,7 @@ fn ingest_file(
 ///
 /// Silently skips binary files, hidden paths, and unreadable entries.
 /// Logs each file name via `eprintln!` so progress is visible in the terminal.
-fn initial_sync(client: &reqwest::blocking::Client, base_url: &str, root: &Path) -> Result<()> {
+fn initial_sync(client: &reqwest::blocking::Client, base_url: &str, root: &Path, generate_summaries: bool) -> Result<()> {
     let mut files = Vec::new();
 
     for entry in WalkDir::new(root)
@@ -94,7 +95,7 @@ fn initial_sync(client: &reqwest::blocking::Client, base_url: &str, root: &Path)
     let payload = json!({
         "root": root.to_string_lossy(),
         "files": files,
-        "generate_summaries": false,
+        "generate_summaries": generate_summaries,
     });
     post_json(client, base_url, "index/ingest", &payload)?;
     eprintln!("[watch] Initial sync complete ({} file(s))", files.len());
@@ -112,7 +113,7 @@ fn initial_sync(client: &reqwest::blocking::Client, base_url: &str, root: &Path)
 /// # Arguments
 /// * `base_url` - Base URL of the mem0 server.
 /// * `path` - Root directory to watch.
-pub fn run_watch_start(base_url: &str, path: &str) -> Result<()> {
+pub fn run_watch_start(base_url: &str, path: &str, generate_summaries: bool) -> Result<()> {
     let root = Path::new(path)
         .canonicalize()
         .unwrap_or_else(|_| Path::new(path).to_path_buf());
@@ -120,7 +121,7 @@ pub fn run_watch_start(base_url: &str, path: &str) -> Result<()> {
     let client = build_client()?;
 
     // ── initial sync ──────────────────────────────────────────────────────────
-    if let Err(e) = initial_sync(&client, base_url, &root) {
+    if let Err(e) = initial_sync(&client, base_url, &root, generate_summaries) {
         eprintln!("[watch] Warning: initial sync failed: {e}");
     }
 
@@ -153,7 +154,7 @@ pub fn run_watch_start(base_url: &str, path: &str) -> Result<()> {
                     EventKind::Create(_) | EventKind::Modify(_) => {
                         for abs_path in &event.paths {
                             if abs_path.is_file() {
-                                if let Err(e) = ingest_file(&client, base_url, &root, abs_path) {
+                                if let Err(e) = ingest_file(&client, base_url, &root, abs_path, generate_summaries) {
                                     eprintln!("[watch] Error ingesting {}: {e}", abs_path.display());
                                 }
                             }
@@ -232,7 +233,7 @@ mod tests {
             .create();
 
         let client = build_client().unwrap();
-        ingest_file(&client, &server.url(), dir.path(), &abs).unwrap();
+        ingest_file(&client, &server.url(), dir.path(), &abs, false).unwrap();
         mock.assert();
     }
 
@@ -243,7 +244,7 @@ mod tests {
         std::fs::write(&bin_path, b"\xff\xfe\x00\x01").unwrap();
         let client = build_client().unwrap();
         // No server needed — binary files are skipped before sending
-        let result = ingest_file(&client, "http://127.0.0.1:19997", dir.path(), &bin_path);
+        let result = ingest_file(&client, "http://127.0.0.1:19997", dir.path(), &bin_path, false);
         assert!(result.is_ok());
     }
 
@@ -254,7 +255,7 @@ mod tests {
         std::fs::write(&hidden, "secret").unwrap();
         let client = build_client().unwrap();
         // No server call expected for hidden file
-        let result = ingest_file(&client, "http://127.0.0.1:19997", dir.path(), &hidden);
+        let result = ingest_file(&client, "http://127.0.0.1:19997", dir.path(), &hidden, false);
         assert!(result.is_ok());
     }
 
@@ -272,7 +273,7 @@ mod tests {
             .create();
 
         let client = build_client().unwrap();
-        initial_sync(&client, &server.url(), dir.path()).unwrap();
+        initial_sync(&client, &server.url(), dir.path(), false).unwrap();
         mock.assert();
     }
 
@@ -281,7 +282,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let client = build_client().unwrap();
         // No server — nothing to send
-        let result = initial_sync(&client, "http://127.0.0.1:19997", dir.path());
+        let result = initial_sync(&client, "http://127.0.0.1:19997", dir.path(), false);
         assert!(result.is_ok());
     }
 

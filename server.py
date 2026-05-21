@@ -25,6 +25,7 @@ from api_models import (
     WatchStopRequest,
 )
 from services.anchor_service import AnchorService
+from services.background_job_service import BackgroundJobService
 from services.file_corpus_service import FileCorpusService
 from services.file_scanner import FileScanner
 from services.index_manifest_service import IndexManifestService
@@ -85,6 +86,7 @@ def create_app(
     app.state.watch_service = WatchService(
         indexing_service=app.state.indexing_service,
     )
+    app.state.job_service = BackgroundJobService()
 
     @app.middleware("http")
     async def correlation_id_middleware(request: Request, call_next: Any) -> Any:
@@ -121,6 +123,10 @@ def create_app(
         @app.on_event("startup")
         def startup_initialize_memory() -> None:
             initialize_memory(app)
+
+    @app.on_event("shutdown")
+    def shutdown_job_service() -> None:
+        app.state.job_service.shutdown(wait=False)
 
     @app.get("/", summary="Redirect to documentation", include_in_schema=False)
     def home() -> RedirectResponse:
@@ -281,12 +287,24 @@ def create_app(
 
     @app.post("/index/sync", summary="Sync a root directory into the file corpus")
     def index_sync(sync_req: IndexSyncRequest, request: Request) -> Any:
+        """Enqueue a filesystem sync of *root* and return a job record immediately.
+
+        The server reads files from its local filesystem; *root* must be a path
+        accessible to the server process.  The actual indexing work runs in a
+        background thread so this endpoint returns quickly even for large trees.
+
+        Returns:
+            A job record dict with ``job_id`` and ``status="queued"``.
+            Poll ``GET /index/jobs/{job_id}`` for progress and errors.
+        """
+        job_id = request.app.state.job_service.submit(
+            request.app.state.indexing_service.sync,
+            sync_req.root,
+            generate_summaries=sync_req.generate_summaries,
+        )
         return _execute_service_call(
             "index_sync",
-            lambda: request.app.state.indexing_service.sync(
-                sync_req.root,
-                generate_summaries=sync_req.generate_summaries,
-            ),
+            lambda: request.app.state.job_service.get_job(job_id),
         )
 
     @app.post("/index/ingest", summary="Ingest file contents into the corpus")
@@ -302,23 +320,70 @@ def create_app(
         ``root``.  Using a stable ``project_id`` ensures that chunks from the
         same project indexed from different machines or paths are stored
         together and do not collide with other projects.
+
+        Returns immediately with a ``job_id``.  Poll ``GET /index/jobs/{job_id}``
+        for status and errors.
         """
+        job_id = request.app.state.job_service.submit(
+            request.app.state.indexing_service.ingest,
+            root=ingest_req.root,
+            files=[f.model_dump() for f in ingest_req.files],
+            generate_summaries=ingest_req.generate_summaries,
+            project_id=ingest_req.project_id,
+        )
         return _execute_service_call(
             "index_ingest",
-            lambda: request.app.state.indexing_service.ingest(
-                root=ingest_req.root,
-                files=[f.model_dump() for f in ingest_req.files],
-                generate_summaries=ingest_req.generate_summaries,
-                project_id=ingest_req.project_id,
-            ),
+            lambda: request.app.state.job_service.get_job(job_id),
         )
+
+    @app.get("/index/jobs", summary="List background indexing jobs")
+    def index_jobs_list(request: Request, limit: int = 50) -> Any:
+        """Return the most-recent indexing jobs, newest first.
+
+        Args:
+            limit: Maximum number of records to return (default ``50``).
+
+        Returns:
+            List of job records, each with keys ``job_id``, ``status``,
+            ``queued_at``, ``started_at``, ``completed_at``, ``result``,
+            and ``errors``.
+        """
+        return _execute_service_call(
+            "index_jobs_list",
+            lambda: request.app.state.job_service.list_jobs(limit=limit),
+        )
+
+    @app.get("/index/jobs/{job_id}", summary="Get status of a background indexing job")
+    def index_job_get(job_id: str, request: Request) -> Any:
+        """Return the job record for *job_id*, or raise 404 if not found.
+
+        Args:
+            job_id: UUID string returned by ``POST /index/sync`` or
+                ``POST /index/ingest``.
+
+        Returns:
+            Job dict with keys ``job_id``, ``status``, ``queued_at``,
+            ``started_at``, ``completed_at``, ``result``, and ``errors``.
+
+        Raises:
+            HTTPException: 404 when *job_id* is not recognised.
+        """
+        def _get() -> dict:
+            record = request.app.state.job_service.get_job(job_id)
+            if record is None:
+                raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
+            return record
+        return _execute_service_call("index_job_get", _get)
 
     @app.post("/index/watch/start", summary="Start watching a root directory")
     def index_watch_start(watch_req: WatchStartRequest, request: Request) -> dict[str, Any]:
         return _execute_service_call(
             "index_watch_start",
             lambda: (
-                request.app.state.watch_service.start(watch_req.root),
+                request.app.state.watch_service.start(
+                    watch_req.root,
+                    generate_summaries=watch_req.generate_summaries,
+                ),
                 {"root": watch_req.root, "watching": True},
             )[-1],
         )
@@ -337,7 +402,10 @@ def create_app(
     def index_status(request: Request) -> Any:
         return _execute_service_call(
             "index_status",
-            lambda: request.app.state.indexing_service.status(),
+            lambda: {
+                **request.app.state.indexing_service.status(),
+                "recent_errors": request.app.state.job_service.recent_errors(),
+            },
         )
 
     @app.post("/index/file", summary="Get all indexed chunks for a specific file")

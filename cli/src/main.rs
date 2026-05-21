@@ -48,7 +48,7 @@ pub enum Commands {
         /// Generate LLM summaries for indexed chunks
         #[arg(long)]
         generate_summaries: bool,
-        /// Server base URL (overrides MEM0_BASE_URL env var and config file)
+        /// Server base URL (overrides MEM0_SERVER_URL env var and config file)
         #[arg(long, short = 'u')]
         url: Option<String>,
     },
@@ -56,6 +56,9 @@ pub enum Commands {
         /// Directory to watch (default: current directory)
         #[arg(default_value = ".")]
         path: String,
+        /// Generate LLM summaries for indexed chunks
+        #[arg(long)]
+        generate_summaries: bool,
         #[arg(long, short = 'u')]
         url: Option<String>,
     },
@@ -124,9 +127,9 @@ async fn main() -> anyhow::Result<()> {
             let base = url.as_deref().map(|u| resolve_base_url(u)).unwrap_or_else(|| Config::from_env().base_url);
             commands::sync::run_sync(&base, &path, generate_summaries, project_id.as_deref())?;
         }
-        Commands::Watch { path, url } => {
+        Commands::Watch { path, url, generate_summaries } => {
             let base = url.as_deref().map(|u| resolve_base_url(u)).unwrap_or_else(|| Config::from_env().base_url);
-            commands::watch::run_watch_start(&base, &path)?;
+            commands::watch::run_watch_start(&base, &path, generate_summaries)?;
         }
         Commands::Status { file, root, embeddings, url } => {
             let base = resolve_base_url(&url);
