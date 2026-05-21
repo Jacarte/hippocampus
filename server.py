@@ -4,6 +4,8 @@ import logging
 import time
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
@@ -255,6 +257,13 @@ def create_app(
             memory_instance = get_memory_instance(request)
         except Exception:
             memory_instance = None
+        logger.info(
+            "query user_id=%s corpora=%s chunk_memory=%s query=%r",
+            query_req.user_id,
+            query_req.corpora,
+            chunk_memory_enabled,
+            query_req.query,
+        )
         return _execute_service_call(
             "unified_query",
             lambda: request.app.state.query_service.query(

@@ -258,3 +258,78 @@ def test_chunk_memory_disabled_flag_off_exact_baseline() -> None:
     result_flag_off = svc.query("hello", corpora=["all"], chunk_memory_enabled=False)
 
     assert result_baseline == result_flag_off
+
+
+def test_chunk_memory_enabled_derives_embedding_from_memory_instance() -> None:
+    """When chunk_memory_enabled=True and no query_embedding is supplied,
+    the embedding is derived automatically via memory_instance.embedding_model.embed."""
+    from unittest.mock import MagicMock
+
+    corpus = FileCorpusService()
+    summary_vec = [1.0, 0.0, 0.0]
+    corpus.upsert_chunks(
+        root="/repo",
+        file_path="bar.py",
+        chunks=[
+            {
+                "id": "bar-1",
+                "content": "def unit_test(): pass",
+                "language": "python",
+                "line_start": 1,
+                "line_end": 1,
+                "summary_text": "A unit test function",
+                "summary_embedding": summary_vec,
+            }
+        ],
+    )
+
+    memory_instance = MagicMock()
+    memory_instance.embedding_model.embed.return_value = summary_vec
+
+    svc = QueryService(corpus=corpus, retrieval_service=FakeRetrieval([]))
+
+    result = svc.query(
+        "unit test",
+        corpora=["file_corpus"],
+        chunk_memory_enabled=True,
+        memory_instance=memory_instance,
+    )
+
+    memory_instance.embedding_model.embed.assert_called_once_with("unit test")
+    assert result["total"] >= 1
+    assert any(h["path"] == "bar.py" for h in result["hits"])
+
+
+def test_chunk_memory_enabled_embed_failure_falls_back_to_lexical() -> None:
+    """When embedding derivation raises, the query falls back to lexical results without error."""
+    from unittest.mock import MagicMock
+
+    corpus = FileCorpusService()
+    corpus.upsert_chunks(
+        root="/repo",
+        file_path="baz.py",
+        chunks=[
+            {
+                "id": "baz-1",
+                "content": "hello world lexical match",
+                "language": "python",
+                "line_start": 1,
+                "line_end": 1,
+            }
+        ],
+    )
+
+    memory_instance = MagicMock()
+    memory_instance.embedding_model.embed.side_effect = RuntimeError("embedder down")
+
+    svc = QueryService(corpus=corpus, retrieval_service=FakeRetrieval([]))
+
+    result = svc.query(
+        "hello",
+        corpora=["file_corpus"],
+        chunk_memory_enabled=True,
+        memory_instance=memory_instance,
+    )
+
+    assert result["degraded"] is False
+    assert result["total"] >= 1

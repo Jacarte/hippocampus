@@ -6,7 +6,10 @@ reports truthful provenance and degradation.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from api_models import FileHit, MemoryHit, UnifiedQueryResponse
 from services.file_corpus_service import FileCorpusService
@@ -53,20 +56,27 @@ class QueryService:
                 store retrieval call.
             chunk_memory_enabled: When ``True``, file-corpus retrieval
                 also consults ``summary_embedding`` fields on chunks via
-                semantic similarity.  Requires *query_embedding* to be
-                provided.  When ``False`` (default), behavior is
+                semantic similarity.  When ``False`` (default), behavior is
                 identical to the previous lexical-only baseline.
-            query_embedding: A vector embedding of *query_text* used for
-                semantic similarity search against chunk summary
-                embeddings.  Only consulted when
-                *chunk_memory_enabled* is ``True``.  Chunks without
-                embeddings are skipped silently.
+            query_embedding: Optional pre-computed vector embedding of
+                *query_text*.  When ``None`` and *chunk_memory_enabled* is
+                ``True``, the embedding is derived automatically from
+                *memory_instance* (``memory_instance.embedding_model.embed``).
+                If embedding derivation fails, a warning is logged and the
+                query falls back to lexical-only results.  Ignored when
+                *chunk_memory_enabled* is ``False``.
 
         Returns:
             A dict matching the UnifiedQueryResponse shape containing
             fused, ranked hits and degradation metadata.
         """
         expanded: list[str] = _expand_corpora(corpora)
+
+        if chunk_memory_enabled and query_embedding is None and memory_instance is not None:
+            try:
+                query_embedding = memory_instance.embedding_model.embed(query_text)
+            except Exception as exc:
+                logger.warning("Failed to embed query for chunk-memory retrieval: %s", exc)
 
         all_hits: list[FileHit | MemoryHit] = []
         corpora_queried: list[str] = []
