@@ -10,6 +10,8 @@ use walkdir::WalkDir;
 
 use crate::client::{build_client, post_json};
 
+const MAX_FILE_BYTES: u64 = 500 * 1024;
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 fn is_hidden_rel(rel: &str) -> bool {

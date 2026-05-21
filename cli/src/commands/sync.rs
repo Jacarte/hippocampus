@@ -60,6 +60,11 @@ pub fn run_sync(base_url: &str, path: &str, generate_summaries: bool, project_id
             continue;
         }
 
+        if entry.metadata().map(|m| m.len()).unwrap_or(0) > MAX_FILE_BYTES {
+            eprintln!("Skipping (>500 KB): {rel_path}");
+            continue;
+        }
+
         let content = match std::fs::read_to_string(abs_path) {
             Ok(c) => c,
             Err(_) => continue,
