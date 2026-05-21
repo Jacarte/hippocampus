@@ -22,3 +22,7 @@ build/
 *.egg-info/
 .vscode/
 .idea/
+cli/target/
+server/__pycache__
+server/tests/__pycache__
+server/services/__pycache__

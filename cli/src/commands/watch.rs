@@ -298,3 +298,27 @@ mod tests {
     }
 
 }
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+
+    #[test]
+    fn test_initial_sync_skips_file_over_500kb() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("big.bin"), "x".repeat(500 * 1024 + 1)).unwrap();
+        let client = build_client().unwrap();
+        let result = initial_sync(&client, "http://127.0.0.1:19997", dir.path(), false);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_ingest_file_skips_file_over_500kb() {
+        let dir = tempfile::tempdir().unwrap();
+        let big_path = dir.path().join("big.bin");
+        std::fs::write(&big_path, "x".repeat(500 * 1024 + 1)).unwrap();
+        let client = build_client().unwrap();
+        let result = ingest_file(&client, "http://127.0.0.1:19997", dir.path(), &big_path, false);
+        assert!(result.is_ok());
+    }
+}

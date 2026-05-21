@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   libpq-dev \
   && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY server/requirements.txt .
 
 RUN pip install --user --no-cache-dir -r requirements.txt
 
@@ -37,10 +37,10 @@ COPY --from=builder /root/.local /root/.local
 
 RUN pip install --no-cache-dir psycopg[pool]
 
-COPY server.py .
-COPY api_models.py .
-COPY tests ./tests
-COPY services ./services
+COPY server/server.py .
+COPY server/api_models.py .
+COPY server/tests ./tests
+COPY server/services ./services
 
 RUN mkdir -p /var/lib/mem0 && \
   chmod 755 /var/lib/mem0

@@ -86,7 +86,7 @@ def create_app(
     app.state.watch_service = WatchService(
         indexing_service=app.state.indexing_service,
     )
-    app.state.job_service = BackgroundJobService()
+    app.state.job_service = BackgroundJobService(max_workers=10)
 
     @app.middleware("http")
     async def correlation_id_middleware(request: Request, call_next: Any) -> Any:
