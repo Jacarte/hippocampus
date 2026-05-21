@@ -38,6 +38,11 @@ fn ingest_file(
         return Ok(());
     }
 
+    if abs_path.metadata().map(|m| m.len()).unwrap_or(0) > MAX_FILE_BYTES {
+        eprintln!("[watch] Skipping (>500 KB): {rel_path}");
+        return Ok(());
+    }
+
     let content = match std::fs::read_to_string(abs_path) {
         Ok(c) => c,
         Err(_) => return Ok(()),
@@ -79,6 +84,10 @@ fn initial_sync(client: &reqwest::blocking::Client, base_url: &str, root: &Path,
             .to_string_lossy()
             .to_string();
         if is_hidden_rel(&rel_path) {
+            continue;
+        }
+        if entry.metadata().map(|m| m.len()).unwrap_or(0) > MAX_FILE_BYTES {
+            eprintln!("[watch] Skipping (>500 KB): {rel_path}");
             continue;
         }
         let content = match std::fs::read_to_string(abs_path) {

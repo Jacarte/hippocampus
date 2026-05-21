@@ -49,6 +49,7 @@ pub fn run_query(
     }
     if let Some(uid) = user_id {
         payload["user_id"] = json!(uid);
+        eprintln!("[query] user: {uid}");
     }
 
     let resp = post_json(&client, base_url, "query", &payload)
