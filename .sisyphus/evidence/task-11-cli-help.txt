@@ -1,0 +1,19 @@
+                                                                                
+ Usage: mgrep_cli.py [OPTIONS] COMMAND [ARGS]...                                
+                                                                                
+ HTTP CLI for the mem0server backend (query, sync, watch, status, reset).       
+                                                                                
+╭─ Options ────────────────────────────────────────────────────────────────────╮
+│ --install-completion          Install completion for the current shell.      │
+│ --show-completion             Show completion for the current shell, to copy │
+│                               it or customize the installation.              │
+│ --help                        Show this message and exit.                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ───────────────────────────────────────────────────────────────────╮
+│ query   Search code files and memory for a query string.                     │
+│ sync    Index (sync) a directory into the file corpus.                       │
+│ watch   Start or stop watching a directory for file changes.                 │
+│ status  Show the current index status.                                       │
+│ reset   Reset the file index (destructive — removes all indexed data).       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+

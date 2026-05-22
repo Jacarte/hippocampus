@@ -1,0 +1,17 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.10.16, pytest-8.4.1, pluggy-1.6.0 -- /Users/javcab/.pyenv/versions/3.10.16/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/javcab/mem0server
+plugins: anyio-4.12.1, langsmith-0.6.4
+collecting ... collected 15 items / 7 deselected / 8 selected
+
+tests/test_indexing.py::TestManifestTracksFingerprints::test_manifest_tracks_fingerprints PASSED [ 12%]
+tests/test_indexing.py::TestManifestTracksFingerprints::test_update_file_replaces_fingerprint PASSED [ 25%]
+tests/test_indexing.py::TestManifestTracksFingerprints::test_remove_file_updates_counts PASSED [ 37%]
+tests/test_indexing.py::TestManifestTracksFingerprints::test_manifest_reset PASSED [ 50%]
+tests/test_indexing.py::TestManifestTracksFingerprints::test_register_root_idempotent PASSED [ 62%]
+tests/test_indexing.py::TestManifestTracksFingerprints::test_remove_nonexistent_file_is_noop PASSED [ 75%]
+tests/test_indexing.py::TestFileScanner::test_scanner_returns_only_supported_files PASSED [ 87%]
+tests/test_indexing.py::TestFileScanner::test_fingerprint_change_detection PASSED [100%]
+
+======================= 8 passed, 7 deselected in 0.05s ========================

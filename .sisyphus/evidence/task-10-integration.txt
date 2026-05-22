@@ -1,0 +1,118 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.10.16, pytest-8.4.1, pluggy-1.6.0 -- /Users/javcab/.pyenv/versions/3.10.16/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/javcab/mem0server
+plugins: anyio-4.12.1, langsmith-0.6.4
+collecting ... collected 87 items
+
+tests/test_api_models.py::test_file_hit_valid PASSED                     [  1%]
+tests/test_api_models.py::test_memory_hit_valid PASSED                   [  2%]
+tests/test_api_models.py::test_unified_query_request_defaults PASSED     [  3%]
+tests/test_api_models.py::test_unified_query_request_empty_string_raises PASSED [  4%]
+tests/test_api_models.py::test_unified_query_request_limit_bounds PASSED [  5%]
+tests/test_api_models.py::test_unified_query_response_valid PASSED       [  6%]
+tests/test_api_models.py::test_index_sync_request_valid PASSED           [  8%]
+tests/test_api_models.py::test_index_sync_response_valid PASSED          [  9%]
+tests/test_api_models.py::test_index_status_response_valid PASSED        [ 10%]
+tests/test_api_models.py::test_index_reset_request_confirm_false_raises PASSED [ 11%]
+tests/test_api_models.py::test_index_reset_request_default_raises PASSED [ 12%]
+tests/test_api_models.py::test_index_reset_request_confirm_true_ok PASSED [ 13%]
+tests/test_api_models.py::test_index_reset_response_valid PASSED         [ 14%]
+tests/test_api_models.py::test_watch_start_request_valid PASSED          [ 16%]
+tests/test_api_models.py::test_watch_stop_request_valid PASSED           [ 17%]
+tests/test_api_models.py::test_capabilities_response_valid PASSED        [ 18%]
+tests/test_indexing.py::TestFileCorpusIsolation::test_upsert_and_query PASSED [ 19%]
+tests/test_indexing.py::TestFileCorpusIsolation::test_file_corpus_isolation PASSED [ 20%]
+tests/test_indexing.py::TestFileCorpusIsolation::test_reset_only_clears_corpus PASSED [ 21%]
+tests/test_indexing.py::TestFileCorpusIsolation::test_delete_file_removes_only_target PASSED [ 22%]
+tests/test_indexing.py::TestFileCorpusIsolation::test_upsert_replaces_existing_file_chunks PASSED [ 24%]
+tests/test_indexing.py::TestFileCorpusIsolation::test_query_with_filters PASSED [ 25%]
+tests/test_indexing.py::TestFileCorpusIsolation::test_query_limit PASSED [ 26%]
+tests/test_indexing.py::TestManifestTracksFingerprints::test_manifest_tracks_fingerprints PASSED [ 27%]
+tests/test_indexing.py::TestManifestTracksFingerprints::test_update_file_replaces_fingerprint PASSED [ 28%]
+tests/test_indexing.py::TestManifestTracksFingerprints::test_remove_file_updates_counts PASSED [ 29%]
+tests/test_indexing.py::TestManifestTracksFingerprints::test_manifest_reset PASSED [ 31%]
+tests/test_indexing.py::TestManifestTracksFingerprints::test_register_root_idempotent PASSED [ 32%]
+tests/test_indexing.py::TestManifestTracksFingerprints::test_remove_nonexistent_file_is_noop PASSED [ 33%]
+tests/test_indexing.py::TestFileScanner::test_scanner_returns_only_supported_files PASSED [ 34%]
+tests/test_indexing.py::TestFileScanner::test_fingerprint_change_detection PASSED [ 35%]
+tests/test_indexing.py::TestCodeChunker::test_python_chunker_emits_symbol_boundaries PASSED [ 36%]
+tests/test_indexing.py::TestCodeChunker::test_fallback_chunker_activates_on_unsupported_language PASSED [ 37%]
+tests/test_indexing.py::TestCodeChunker::test_fallback_chunker_activates_on_parse_failure PASSED [ 39%]
+tests/test_indexing.py::TestCodeChunker::test_go_chunker_emits_function_boundaries PASSED [ 40%]
+tests/test_indexing.py::TestCodeChunker::test_typescript_chunker_emits_function_and_class_boundaries PASSED [ 41%]
+tests/test_indexing.py::TestMarkdownChunker::test_markdown_heading_boundaries PASSED [ 42%]
+tests/test_indexing.py::TestMarkdownChunker::test_markdown_no_headings_produces_single_chunk PASSED [ 43%]
+tests/test_indexing.py::TestIndexingService::test_sync_indexes_fixture_root PASSED [ 44%]
+tests/test_indexing.py::TestIndexingService::test_sync_is_incremental PASSED [ 45%]
+tests/test_indexing.py::TestIndexingService::test_reset_clears_corpus_and_manifest PASSED [ 47%]
+tests/test_indexing.py::TestWatchService::test_watch_start_stop_lifecycle PASSED [ 48%]
+tests/test_indexing.py::TestWatchService::test_watch_start_noop_if_already_watching PASSED [ 49%]
+tests/test_indexing.py::TestWatchService::test_watch_propagates_file_changes PASSED [ 50%]
+tests/test_indexing.py::TestWatchService::test_watch_status_reports_active_roots PASSED [ 51%]
+tests/test_integration.py::test_sync_fixture_root_status_shows_nonzero_counts PASSED [ 52%]
+tests/test_integration.py::test_sync_excludes_node_modules PASSED        [ 54%]
+tests/test_integration.py::test_query_after_sync_returns_code_and_markdown_hits PASSED [ 55%]
+tests/test_integration.py::test_watch_start_stop_uses_watch_service_without_real_polling PASSED [ 56%]
+tests/test_integration.py::test_index_reset_clears_file_corpus_independently_from_memory PASSED [ 57%]
+tests/test_integration.py::test_degraded_query_file_corpus_raises_returns_memory_hits_and_degraded_flag PASSED [ 58%]
+tests/test_integration.py::test_capabilities_endpoint_returns_both_sections PASSED [ 59%]
+tests/test_query_api.py::test_query_returns_fused_results PASSED         [ 60%]
+tests/test_query_api.py::test_query_file_corpus_only PASSED              [ 62%]
+tests/test_query_api.py::test_query_memory_only PASSED                   [ 63%]
+tests/test_query_api.py::test_query_degrades_gracefully_on_file_corpus_error PASSED [ 64%]
+tests/test_query_api.py::test_query_degrades_gracefully_on_memory_error PASSED [ 65%]
+tests/test_server.py::test_health_and_configure_smoke_without_live_dependencies PASSED [ 66%]
+tests/test_server.py::test_configure_logs_redact_sensitive_runtime_config PASSED [ 67%]
+tests/test_server.py::test_crud_search_history_routes_delegate_through_service_layer PASSED [ 68%]
+tests/test_server.py::test_retrieval_service_lexical_search_hits_rare_metadata_keyword_without_network PASSED [ 70%]
+tests/test_server.py::test_structured_anchor_metadata_is_persisted_and_canonicalized PASSED [ 71%]
+tests/test_server.py::test_legacy_or_unresolved_memories_return_null_anchor_without_failure PASSED [ 72%]
+tests/test_server.py::test_read_search_and_history_return_anchor_aware_generic_json PASSED [ 73%]
+tests/test_server.py::test_write_derives_commit_pinned_anchor_from_anchor_context PASSED [ 74%]
+tests/test_server.py::test_write_with_incomplete_anchor_context_stays_derived_and_non_fatal PASSED [ 75%]
+tests/test_server.py::test_search_propagates_correlation_id_and_structured_retrieval_trace PASSED [ 77%]
+tests/test_server.py::test_retrieve_returns_fused_ranked_results_with_capabilities PASSED [ 78%]
+tests/test_server.py::test_retrieve_degrades_to_lexical_results_when_semantic_fails PASSED [ 79%]
+tests/test_server.py::test_retrieve_ignores_include_cold_context_control_flag_for_filtering PASSED [ 80%]
+tests/test_server.py::test_retrieve_returns_fused_results_when_rerank_fails PASSED [ 81%]
+tests/test_server.py::test_regression_search_result_retrieval_field_exact_shape PASSED [ 82%]
+tests/test_server.py::test_regression_search_trace_retrieval_nested_field_contract PASSED [ 83%]
+tests/test_server.py::test_regression_retrieve_backend_capabilities_field_contract PASSED [ 85%]
+tests/test_server.py::test_regression_retrieve_degradation_reasons_is_empty_list_when_healthy PASSED [ 86%]
+tests/test_server.py::test_regression_retrieve_degradation_reasons_semantic_unavailable PASSED [ 87%]
+tests/test_server.py::test_regression_retrieve_result_retrieval_meta_field_contract PASSED [ 88%]
+tests/test_server.py::test_regression_memory_crud_create_list_get_delete_response_shapes PASSED [ 89%]
+tests/test_server.py::test_regression_retrieve_trace_retrieval_contains_backend_capabilities PASSED [ 90%]
+tests/test_server.py::test_query_capabilities_route_returns_expected_shape PASSED [ 91%]
+tests/test_server.py::test_index_status_route_returns_expected_shape PASSED [ 93%]
+tests/test_server.py::test_index_reset_requires_confirm_true PASSED      [ 94%]
+tests/test_server.py::test_index_reset_succeeds_with_confirm_true PASSED [ 95%]
+tests/test_server.py::test_index_watch_start_stop_round_trip PASSED      [ 96%]
+tests/test_server.py::test_index_sync_route_returns_expected_shape PASSED [ 97%]
+tests/test_server.py::test_unified_query_route_returns_expected_shape PASSED [ 98%]
+tests/test_server.py::test_unified_query_rejects_empty_query PASSED      [100%]
+
+=============================== warnings summary ===============================
+tests/test_integration.py: 8 warnings
+tests/test_server.py: 29 warnings
+  /Users/javcab/mem0server/server.py:116: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+tests/test_integration.py: 8 warnings
+tests/test_server.py: 29 warnings
+  /Users/javcab/.pyenv/versions/3.10.16/lib/python3.10/site-packages/fastapi/applications.py:4573: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 87 passed, 74 warnings in 2.44s ========================
