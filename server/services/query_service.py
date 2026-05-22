@@ -177,6 +177,7 @@ class QueryService:
                     age = datetime.now() - created_at_dt
                     halflife = timedelta(days=3)
                     decay_factor = 0.9 ** (age / halflife)
+                    # day 1, 0.9; day 3, 0.729; day 7, 0.531; day 14, 0.282
                     return hit.score * decay_factor
                 except ValueError:
                     logger.warning(

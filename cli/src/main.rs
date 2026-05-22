@@ -34,7 +34,7 @@ pub enum Commands {
         #[arg(long)]
         user_id: Option<String>,
         /// Minimum relevance score for memory-store hits (0.0–1.0). Default: 0.5.
-        #[arg(long, default_value = "0.5")]
+        #[arg(long, default_value = "0.8")]
         min_score_memory: f64,
         /// Minimum relevance score for file-corpus hits (0.0–1.0). Default: 0.05.
         #[arg(long, default_value = "0.05")]

@@ -80,12 +80,14 @@ pub fn run_query(
         None => {
             print_no_results();
         }
-        Some(hits) if hits.is_empty() => {
-            print_no_results();
-        }
         Some(hits) => {
-            for (i, hit) in hits.iter().enumerate() {
-                println!("{}", render_hit_line(i, hit));
+            let filtered_hits = filter_hits_by_score(hits, min_score_memory, min_score_files);
+            if filtered_hits.is_empty() {
+                print_no_results();
+            } else {
+                for (i, hit) in filtered_hits.iter().enumerate() {
+                    println!("{}", render_hit_line(i, hit));
+                }
             }
         }
     }
@@ -95,6 +97,28 @@ pub fn run_query(
     }
 
     Ok(())
+}
+
+fn filter_hits_by_score<'a>(
+    hits: &'a [Value],
+    min_score_memory: f64,
+    min_score_files: f64,
+) -> Vec<&'a Value> {
+    hits.iter()
+        .filter(|hit| match hit.get("corpus").and_then(|value| value.as_str()) {
+            Some("memory_store") => hit
+                .get("score")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                >= min_score_memory,
+            Some("file_corpus") => hit
+                .get("score")
+                .and_then(|value| value.as_f64())
+                .unwrap_or(0.0)
+                >= min_score_files,
+            _ => true,
+        })
+        .collect()
 }
 
 fn build_hidden_memory_notice(parsed: &Value) -> Option<String> {
@@ -510,6 +534,32 @@ mod tests {
         });
 
         assert!(build_hidden_memory_notice(&parsed).is_none());
+    }
+
+    #[test]
+    fn test_filter_hits_by_score_applies_per_corpus_thresholds() {
+        let hits = vec![
+            serde_json::json!({"corpus": "memory_store", "score": 0.49, "content": "drop me"}),
+            serde_json::json!({"corpus": "memory_store", "score": 0.50, "content": "keep me"}),
+            serde_json::json!({"corpus": "file_corpus", "score": 0.04, "path": "a.rs", "line_start": 1}),
+            serde_json::json!({"corpus": "file_corpus", "score": 0.05, "path": "b.rs", "line_start": 2}),
+        ];
+
+        let filtered = filter_hits_by_score(&hits, 0.5, 0.05);
+
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0]["content"], "keep me");
+        assert_eq!(filtered[1]["path"], "b.rs");
+    }
+
+    #[test]
+    fn test_filter_hits_by_score_keeps_unknown_corpora() {
+        let hits = vec![serde_json::json!({"corpus": "other", "score": 0.0, "payload": true})];
+
+        let filtered = filter_hits_by_score(&hits, 0.5, 0.05);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0]["payload"], true);
     }
 
     #[test]
