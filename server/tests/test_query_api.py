@@ -333,3 +333,72 @@ def test_chunk_memory_enabled_embed_failure_falls_back_to_lexical() -> None:
 
     assert result["degraded"] is False
     assert result["total"] >= 1
+
+
+def test_query_filters_hits_below_min_score() -> None:
+    """Hits with score below min_score must be excluded from results."""
+    corpus = FileCorpusService()
+    corpus.upsert_chunks(
+        root="/repo",
+        file_path="bar.py",
+        chunks=[
+            {
+                "language": "python",
+                "symbol_name": "low_score_func",
+                "symbol_kind": "function",
+                "line_start": 1,
+                "line_end": 3,
+                "content": "threshold test low",
+            },
+        ],
+    )
+    low_mem = {"id": "mem-low", "memory": "threshold test low", "_retrieval": {"score": 0.3}, "metadata": None}
+    ok_mem = {"id": "mem-ok", "memory": "threshold test ok", "_retrieval": {"score": 0.5}, "metadata": None}
+
+    retrieval = FakeRetrieval([low_mem, ok_mem])
+    svc = QueryService(corpus=corpus, retrieval_service=retrieval)
+
+    result = svc.query("threshold test", corpora=["memory_store"], min_score=0.5, memory_instance=object())
+
+    scores = [h["score"] for h in result["hits"]]
+    assert all(s >= 0.5 for s in scores), f"Expected all scores >= 0.5, got {scores}"
+    assert any(h["memory_id"] == "mem-ok" for h in result["hits"])
+    assert not any(h["memory_id"] == "mem-low" for h in result["hits"])
+
+
+def test_query_all_filtered_returns_empty_hits() -> None:
+    """When every hit is below min_score, hits must be an empty list."""
+    retrieval = FakeRetrieval([
+        {"id": "m1", "memory": "low", "_retrieval": {"score": 0.1}, "metadata": None},
+    ])
+    svc = QueryService(corpus=FileCorpusService(), retrieval_service=retrieval)
+
+    result = svc.query("low", corpora=["memory_store"], min_score=0.9, memory_instance=object())
+
+    assert result["hits"] == []
+    assert result["total"] == 1  # total reflects pre-filter count
+
+
+def test_query_min_score_zero_returns_all_hits() -> None:
+    """min_score=0.0 must not filter anything."""
+    corpus = _make_corpus_with_chunks()
+    retrieval = FakeRetrieval([_fake_memory_result()])
+    svc = QueryService(corpus=corpus, retrieval_service=retrieval)
+
+    result = svc.query("hello", corpora=["all"], min_score=0.0, memory_instance=object())
+
+    assert len(result["hits"]) == 3  # all three survive
+
+
+def test_query_default_min_score_is_0_5() -> None:
+    """Calling query() without min_score must apply the 0.5 default."""
+    low_mem = {"id": "low", "memory": "hello low", "_retrieval": {"score": 0.2}, "metadata": None}
+    high_mem = {"id": "high", "memory": "hello high", "_retrieval": {"score": 0.8}, "metadata": None}
+    retrieval = FakeRetrieval([low_mem, high_mem])
+    svc = QueryService(corpus=FileCorpusService(), retrieval_service=retrieval)
+
+    result = svc.query("hello", corpora=["memory_store"], memory_instance=object())
+
+    ids = [h["memory_id"] for h in result["hits"]]
+    assert "high" in ids
+    assert "low" not in ids

@@ -85,6 +85,16 @@ class UnifiedQueryRequest(BaseModel):
             "per-user scoping.  When omitted the server applies no user filter."
         ),
     )
+    min_score: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum relevance score threshold.  Hits with a score strictly "
+            "below this value are excluded from the response.  Defaults to "
+            "0.5.  Set to 0.0 to disable filtering."
+        ),
+    )
 
 
 class UnifiedQueryResponse(BaseModel):
