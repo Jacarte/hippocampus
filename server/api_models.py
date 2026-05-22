@@ -60,6 +60,7 @@ class FileHit(BaseModel):
     line_end: int
     snippet: str
     score: float
+    datetime: str | None = None
     corpus: str = "file_corpus"
 
 
@@ -67,6 +68,7 @@ class MemoryHit(BaseModel):
     memory_id: str
     content: str
     score: float
+    datetime: str | None = None
     corpus: str = "memory_store"
     metadata: dict[str, Any] | None = None
 

@@ -6,11 +6,11 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from services.file_corpus_service import FileCorpusService
-from services.file_scanner import FileScanner, _EXT_TO_LANG
-from services.index_manifest_service import IndexManifestService
-from services.chunkers import CodeChunker, MarkdownChunker
-from services.summary_service import SummaryService
+from .file_corpus_service import FileCorpusService
+from .file_scanner import FileScanner, _EXT_TO_LANG
+from .index_manifest_service import IndexManifestService
+from .chunkers import CodeChunker, MarkdownChunker
+from .summary_service import SummaryService
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,13 @@ _MARKDOWN_EXTS = {".md", ".txt", ".rst"}
 
 def _now_iso() -> str:
     return (
-        datetime.now(timezone.utc)
+        datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    )
+
+
+def _file_mtime_iso(path: str) -> str:
+    return (
+        datetime.fromtimestamp(os.path.getmtime(path), tz=timezone.utc)
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z")
     )
@@ -110,7 +116,7 @@ class IndexingService:
 
         for file_key, record in self._manifest._files.items():
             if file_key.startswith(f"{root}\x00"):
-                fp = file_key[len(root) + 1:]
+                fp = file_key[len(root) + 1 :]
                 if fp not in prev_fingerprints:
                     prev_fingerprints[fp] = record.fingerprint
 
@@ -134,6 +140,10 @@ class IndexingService:
                 else:
                     language = _EXT_TO_LANG.get(ext, "unknown")
                     chunks = CodeChunker().chunk(file_path, content, language)
+
+                indexed_at = _file_mtime_iso(abs_path)
+                for chunk in chunks:
+                    chunk.setdefault("indexed_at", indexed_at)
 
                 if generate_summaries and self._memory is None:
                     logger.warning(
@@ -232,6 +242,10 @@ class IndexingService:
                 else:
                     language = _EXT_TO_LANG.get(ext, "unknown")
                     chunks = CodeChunker().chunk(file_path, content, language)
+
+                indexed_at = _now_iso()
+                for chunk in chunks:
+                    chunk.setdefault("indexed_at", indexed_at)
 
                 if generate_summaries and self._memory is None:
                     logger.warning(
@@ -345,13 +359,17 @@ class IndexingService:
             - ``chunks`` – list of chunk dicts; see
               :meth:`FileCorpusService.get_file_chunks` for the exact shape.
         """
-        roots_to_search = [root] if root is not None else list(self._manifest._roots.keys())
+        roots_to_search = (
+            [root] if root is not None else list(self._manifest._roots.keys())
+        )
 
-        all_chunks: list[dict] = []
-        manifest_info: dict | None = None
+        all_chunks: list[dict[str, Any]] = []
+        manifest_info: dict[str, Any] | None = None
 
         for r in roots_to_search:
-            chunks = self._corpus.get_file_chunks(r, file_path, include_embeddings=include_embeddings)
+            chunks = self._corpus.get_file_chunks(
+                r, file_path, include_embeddings=include_embeddings
+            )
             all_chunks.extend(chunks)
             if manifest_info is None:
                 record = self._manifest.get_file_record(r, file_path)

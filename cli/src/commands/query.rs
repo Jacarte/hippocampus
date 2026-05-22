@@ -85,40 +85,7 @@ pub fn run_query(
         }
         Some(hits) => {
             for (i, hit) in hits.iter().enumerate() {
-                let hit_type = hit
-                    .get("corpus")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let score = hit.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
-
-                if hit_type == "file_corpus" {
-                    let path = hit.get("path").and_then(|v| v.as_str()).unwrap_or("");
-                    let line = hit
-                        .get("line_start")
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "?".to_string());
-                    println!("[{}] {}:{} score={:.3}", i + 1, path, line, score);
-                } else if hit_type == "memory_store" {
-                    let content = hit
-                        .get("content")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    let first_line: String = content
-                        .trim()
-                        .lines()
-                        .next()
-                        .unwrap_or("")
-                        .chars()
-                        .take(120)
-                        .collect();
-                    println!("[{}] MEM   score={:.3}  {}", i + 1, score, first_line);
-                } else {
-                    println!(
-                        "[{}] {}",
-                        i + 1,
-                        serde_json::to_string(hit).unwrap_or_default()
-                    );
-                }
+                println!("{}", render_hit_line(i, hit));
             }
         }
     }
@@ -153,7 +120,77 @@ fn build_hidden_memory_notice(parsed: &Value) -> Option<String> {
     None
 }
 
-#[cfg(test)]
+fn render_hit_line(index: usize, hit: &Value) -> String {
+    let hit_type = hit
+        .get("corpus")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let score = hit.get("score").and_then(|value| value.as_f64()).unwrap_or(0.0);
+    let datetime = hit.get("datetime").and_then(|value| value.as_str());
+
+    if hit_type == "file_corpus" {
+        let path = hit.get("path").and_then(|value| value.as_str()).unwrap_or("");
+        let line = hit
+            .get("line_start")
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "?".to_string());
+        let snippet = hit
+            .get("snippet")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let label = render_label("FILE", datetime);
+        return format!(
+            "[{}] {} {}:{} score={:.3} {}",
+            index + 1,
+            label,
+            path,
+            line,
+            score,
+            first_line(snippet)
+        );
+    }
+
+    if hit_type == "memory_store" {
+        let content = hit
+            .get("content")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let label = render_label("MEMORY", datetime);
+        return format!(
+            "[{}] {} score={:.3} {}",
+            index + 1,
+            label,
+            score,
+            first_line(content)
+        );
+    }
+
+
+
+    format!(
+        "[{}] {}",
+        index + 1,
+        serde_json::to_string(hit).unwrap_or_default()
+    )
+}
+
+fn render_label(kind: &str, datetime: Option<&str>) -> String {
+    match datetime {
+        Some(value) if !value.is_empty() => format!("{kind} from {value}"),
+        _ => kind.to_string(),
+    }
+}
+
+fn first_line(text: &str) -> String {
+    text.trim()
+        .lines()
+        .next()
+        .unwrap_or("")
+        .chars()
+        .take(120)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -473,5 +510,41 @@ mod tests {
         });
 
         assert!(build_hidden_memory_notice(&parsed).is_none());
+    }
+
+    #[test]
+    fn test_render_hit_line_includes_memory_datetime_and_summary() {
+        let hit = serde_json::json!({
+            "corpus": "memory_store",
+            "score": 0.91,
+            "datetime": "2026-05-20T10:00:00Z",
+            "content": "remember this important detail\nwith more text",
+        });
+
+        let line = render_hit_line(0, &hit);
+
+        assert_eq!(
+            line,
+            "[1] MEMORY from 2026-05-20T10:00:00Z score=0.910 remember this important detail"
+        );
+    }
+
+    #[test]
+    fn test_render_hit_line_includes_file_datetime_path_and_snippet() {
+        let hit = serde_json::json!({
+            "corpus": "file_corpus",
+            "score": 0.75,
+            "datetime": "2026-05-19T09:00:00Z",
+            "path": "src/foo.py",
+            "line_start": 12,
+            "snippet": "def hello_world():\n    pass",
+        });
+
+        let line = render_hit_line(1, &hit);
+
+        assert_eq!(
+            line,
+            "[2] FILE from 2026-05-19T09:00:00Z src/foo.py:12 score=0.750 def hello_world():"
+        );
     }
 }

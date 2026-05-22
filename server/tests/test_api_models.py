@@ -33,14 +33,22 @@ def test_file_hit_valid():
         line_end=5,
         snippet="def foo(): pass",
         score=0.9,
+        datetime="2026-05-22T09:00:00Z",
     )
     assert hit.corpus == "file_corpus"
+    assert hit.datetime == "2026-05-22T09:00:00Z"
     assert hit.symbol_name is None
 
 
 def test_memory_hit_valid():
-    hit = MemoryHit(memory_id="abc123", content="some memory", score=0.8)
+    hit = MemoryHit(
+        memory_id="abc123",
+        content="some memory",
+        score=0.8,
+        datetime="2026-05-21T11:00:00Z",
+    )
     assert hit.corpus == "memory_store"
+    assert hit.datetime == "2026-05-21T11:00:00Z"
     assert hit.metadata is None
 
 

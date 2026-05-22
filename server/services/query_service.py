@@ -13,7 +13,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 from api_models import FileHit, MemoryHit, UnifiedQueryResponse
-from services.file_corpus_service import FileCorpusService
+from .file_corpus_service import FileCorpusService
 
 
 class QueryService:
@@ -136,14 +136,25 @@ class QueryService:
                 degradation_reasons.append(f"memory_store: {exc}")
 
         all_hits.sort(key=lambda h: h.score, reverse=True)
-        filtered = [
+        filteredMems = [
             h
             for h in all_hits
-            if (h.corpus == "memory_store" and h.score >= min_score_memory)
-            or (h.corpus == "file_corpus" and h.score >= min_score_files)
+            if (
+                h.corpus == "memory_store" and h.score >= min_score_memory
+            )  # add decay factor to memory scores to prefer file hits when scores are close
         ]
-        available_hits_by_corpus = self._count_hits_by_corpus(filtered)
-        truncated = filtered[:limit]
+        filteredFiles = [
+            h
+            for h in all_hits
+            if (
+                h.corpus == "file_corpus"
+                and QueryService._get_score_by_decay_factor(h) >= min_score_files
+            )
+        ]
+        available_hits_by_corpus = self._count_hits_by_corpus(
+            filteredMems + filteredFiles
+        )
+        truncated = filteredMems[:limit] + filteredFiles[:limit]
 
         return UnifiedQueryResponse(
             hits=truncated,
@@ -153,6 +164,33 @@ class QueryService:
             degraded=degraded,
             degradation_reasons=degradation_reasons,
         ).model_dump()
+
+    @staticmethod
+    def _get_score_by_decay_factor(hit: FileHit | MemoryHit) -> float:
+        if isinstance(hit, MemoryHit):
+            created_at = hit.metadata.get("created_at") if hit.metadata else None
+            if created_at:
+                from datetime import datetime, timedelta
+
+                try:
+                    created_at_dt = datetime.fromisoformat(created_at)
+                    age = datetime.now() - created_at_dt
+                    halflife = timedelta(days=3)
+                    decay_factor = 0.9 ** (age / halflife)
+                    return hit.score * decay_factor
+                except ValueError:
+                    logger.warning(
+                        "Invalid created_at format for memory_id %s: %s",
+                        getattr(hit, "memory_id", "unknown"),
+                        created_at,
+                    )
+            else:
+                logger.warning(
+                    "Missing created_at for memory_id %s; skipping decay",
+                    getattr(hit, "memory_id", "unknown"),
+                )
+            return hit.score
+        return hit.score
 
     def _query_file_corpus(
         self,
@@ -195,6 +233,7 @@ class QueryService:
                     "line_end": chunk.get("line_end") or 0,
                     "snippet": chunk.get("content", ""),
                     "score": float(chunk.get("score", 0.0)),
+                    "datetime": self._coerce_file_datetime(chunk),
                     "corpus": "file_corpus",
                 }
             )
@@ -247,6 +286,7 @@ class QueryService:
                     "memory_id": str(result.get("id", "")),
                     "content": result.get("memory", ""),
                     "score": self._coerce_memory_score(result),
+                    "datetime": self._coerce_memory_datetime(result),
                     "corpus": "memory_store",
                     "metadata": result.get("metadata"),
                 }
@@ -279,6 +319,30 @@ class QueryService:
                 return float(nested_score)
 
         return 0.0
+
+    @staticmethod
+    def _coerce_memory_datetime(result: dict[str, Any]) -> str | None:
+        for key in ("updated_at", "created_at"):
+            value = result.get(key)
+            if isinstance(value, str) and value:
+                return value
+
+        metadata = result.get("metadata")
+        if isinstance(metadata, dict):
+            for key in ("updated_at", "created_at"):
+                value = metadata.get(key)
+                if isinstance(value, str) and value:
+                    return value
+
+        return None
+
+    @staticmethod
+    def _coerce_file_datetime(chunk: dict[str, Any]) -> str | None:
+        for key in ("indexed_at", "last_indexed_at", "modified_at", "created_at"):
+            value = chunk.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return None
 
     @staticmethod
     def _count_hits_by_corpus(hits: list[FileHit | MemoryHit]) -> dict[str, int]:

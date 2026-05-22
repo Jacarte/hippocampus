@@ -104,6 +104,7 @@ def _fake_mem0_search_result() -> dict[str, Any]:
         "id": "mem-1",
         "memory": "hello from memory",
         "score": 0.9,
+        "created_at": "2026-05-20T10:00:00Z",
         "metadata": None,
     }
 
@@ -166,8 +167,54 @@ def test_query_memory_store_works_with_real_retrieval_service() -> None:
     assert result["available_hits_by_corpus"] == {"memory_store": 1}
     assert len(result["hits"]) == 1
     assert result["hits"][0]["corpus"] == "memory_store"
+    assert result["hits"][0]["datetime"] == "2026-05-20T10:00:00Z"
     assert memory_backend.last_search_kwargs is not None
     assert memory_backend.last_search_kwargs["limit"] == 10
+
+
+def test_query_memory_hit_uses_updated_at_when_available() -> None:
+    corpus = _make_corpus_with_chunks()
+    retrieval = FakeRetrieval(
+        [
+            {
+                "id": "mem-2",
+                "memory": "newer memory",
+                "score": 0.8,
+                "created_at": "2026-05-20T10:00:00Z",
+                "updated_at": "2026-05-21T10:00:00Z",
+                "metadata": None,
+            }
+        ]
+    )
+    svc = QueryService(corpus=corpus, retrieval_service=retrieval)
+
+    result = svc.query("newer", corpora=["memory_store"], memory_instance=object())
+
+    assert result["hits"][0]["datetime"] == "2026-05-21T10:00:00Z"
+
+
+def test_query_file_hit_returns_indexed_datetime_when_available() -> None:
+    corpus = FileCorpusService()
+    corpus.upsert_chunks(
+        root="/repo",
+        file_path="dated.py",
+        chunks=[
+            {
+                "language": "python",
+                "symbol_name": "dated_fn",
+                "symbol_kind": "function",
+                "line_start": 1,
+                "line_end": 2,
+                "content": "hello dated world",
+                "indexed_at": "2026-05-19T12:00:00Z",
+            }
+        ],
+    )
+    svc = QueryService(corpus=corpus, retrieval_service=FakeRetrieval([]))
+
+    result = svc.query("dated", corpora=["file_corpus"])
+
+    assert result["hits"][0]["datetime"] == "2026-05-19T12:00:00Z"
 
 
 def test_query_memory_store_forwards_custom_limit_to_real_retrieval_service() -> None:
@@ -187,7 +234,7 @@ def test_query_memory_store_forwards_custom_limit_to_real_retrieval_service() ->
     assert memory_backend.last_search_kwargs["limit"] == 3
 
 
-def test_query_reports_hidden_memory_hits_when_shared_limit_keeps_only_files() -> None:
+def test_query_attaches_memory_hits_ahead_of_file_hits() -> None:
     corpus = FileCorpusService()
     corpus.upsert_chunks(
         root="/repo",
@@ -229,8 +276,9 @@ def test_query_reports_hidden_memory_hits_when_shared_limit_keeps_only_files() -
         "file_corpus": 10,
         "memory_store": 1,
     }
-    assert len(result["hits"]) == 10
-    assert all(hit["corpus"] == "file_corpus" for hit in result["hits"])
+    assert len(result["hits"]) == 11
+    assert result["hits"][0]["corpus"] == "memory_store"
+    assert all(hit["corpus"] == "file_corpus" for hit in result["hits"][1:])
 
 
 def test_query_degrades_gracefully_on_file_corpus_error() -> None:

@@ -47,6 +47,7 @@ class FileCorpusService:
                 "line_end": chunk.get("line_end"),
                 "content": chunk.get("content", ""),
                 "score": 0.0,
+                "indexed_at": chunk.get("indexed_at"),
                 "summary_text": chunk.get("summary_text"),
                 "summary_embedding": chunk.get("summary_embedding"),
             }
@@ -91,7 +92,9 @@ class FileCorpusService:
                 limit=limit,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("summary-backed retrieval failed, falling back to lexical: %s", exc)
+            logger.warning(
+                "summary-backed retrieval failed, falling back to lexical: %s", exc
+            )
             return lexical
 
         return merged
@@ -167,8 +170,16 @@ class FileCorpusService:
                     for field, value in filters.items()
                 ):
                     continue
-            tf = sum(lowered_content.count(t) for t in query_tokens) if query_tokens else 0
-            phrase_bonus = len(query_tokens) if query_tokens and lowered_query in lowered_content else 0
+            tf = (
+                sum(lowered_content.count(t) for t in query_tokens)
+                if query_tokens
+                else 0
+            )
+            phrase_bonus = (
+                len(query_tokens)
+                if query_tokens and lowered_query in lowered_content
+                else 0
+            )
             word_count = max(len(lowered_content.split()), 1)
             score = round((tf + phrase_bonus) / word_count, 6)
             result = dict(chunk)
@@ -222,11 +233,10 @@ class FileCorpusService:
         Returns an empty list when no chunks exist for the given (root, file_path) pair.
         """
         prefix = f"{root}\x00{file_path}\x00"
-        chunks = [
-            dict(c) for key, c in self._chunks.items()
-            if key.startswith(prefix)
-        ]
-        chunks.sort(key=lambda c: (c.get("line_start") is None, c.get("line_start") or 0))
+        chunks = [dict(c) for key, c in self._chunks.items() if key.startswith(prefix)]
+        chunks.sort(
+            key=lambda c: (c.get("line_start") is None, c.get("line_start") or 0)
+        )
         for chunk in chunks:
             chunk.pop("score", None)
             if not include_embeddings:
