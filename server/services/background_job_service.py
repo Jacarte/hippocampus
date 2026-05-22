@@ -33,7 +33,7 @@ class BackgroundJobService:
             concurrency-safe backends.
     """
 
-    def __init__(self, max_workers: int = 1) -> None:
+    def __init__(self, max_workers: int = 20) -> None:
         self._executor = ThreadPoolExecutor(
             max_workers=max_workers,
             thread_name_prefix="ingest-worker",
