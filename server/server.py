@@ -86,7 +86,7 @@ def create_app(
     app.state.watch_service = WatchService(
         indexing_service=app.state.indexing_service,
     )
-    app.state.job_service = BackgroundJobService(max_workers=10)
+    app.state.job_service = BackgroundJobService(max_workers=20)
 
     @app.middleware("http")
     async def correlation_id_middleware(request: Request, call_next: Any) -> Any:
@@ -282,6 +282,7 @@ def create_app(
                 chunk_memory_enabled=chunk_memory_enabled,
                 memory_instance=memory_instance,
                 user_id=query_req.user_id,
+                min_score=query_req.min_score,
             ),
         )
 
