@@ -68,7 +68,7 @@ class MemoryHit(BaseModel):
     content: str
     score: float
     corpus: str = "memory_store"
-    metadata: dict | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class UnifiedQueryRequest(BaseModel):
@@ -85,12 +85,35 @@ class UnifiedQueryRequest(BaseModel):
             "per-user scoping.  When omitted the server applies no user filter."
         ),
     )
+    min_score_memory: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum relevance score for memory-store hits (range 0.0–1.0).  "
+            "Hits from the memory corpus with a score strictly below this value "
+            "are excluded.  Defaults to 0.5.  Set to 0.0 to disable filtering "
+            "for this corpus."
+        ),
+    )
+    min_score_files: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum relevance score for file-corpus hits (range 0.0–1.0).  "
+            "Hits from the file corpus with a score strictly below this value "
+            "are excluded.  Defaults to 0.05 (matches typical BM25 noise floor).  "
+            "Set to 0.0 to disable filtering for this corpus."
+        ),
+    )
 
 
 class UnifiedQueryResponse(BaseModel):
     hits: list[FileHit | MemoryHit]
     total: int
     corpora_queried: list[str]
+    available_hits_by_corpus: dict[str, int] = Field(default_factory=dict)
     degraded: bool = False
     degradation_reasons: list[str] = []
 
@@ -114,7 +137,7 @@ class IndexSyncResponse(BaseModel):
 
 
 class IndexStatusResponse(BaseModel):
-    roots: list[dict]
+    roots: list[dict[str, Any]]
     total_files: int
     total_chunks: int
 

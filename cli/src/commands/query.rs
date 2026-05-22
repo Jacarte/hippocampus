@@ -18,6 +18,12 @@ use crate::output::{print_json, print_no_results};
 ///   payload.  When `Some`, the server scopes memory-corpus results to that
 ///   user.  When `None`, the field is omitted and the server applies its
 ///   default (no per-user scoping).
+/// * `min_score_memory` - Minimum relevance score (0.0–1.0) for memory-store hits forwarded to
+///   the server.  Hits with a score strictly below this value are excluded.  Defaults to `0.5`.
+///   Set to `0.0` to disable memory-hit filtering.
+/// * `min_score_files` - Minimum relevance score (0.0–1.0) for file-corpus hits forwarded to
+///   the server.  Hits with a score strictly below this value are excluded.  Defaults to `0.05`
+///   (BM25 noise floor).  Set to `0.0` to disable file-hit filtering.
 /// * `raw` - When `true`, print raw JSON instead of formatted hits.
 pub fn run_query(
     base_url: &str,
@@ -28,6 +34,8 @@ pub fn run_query(
     language_filter: Option<&str>,
     scope_filter: Option<&str>,
     user_id: Option<&str>,
+    min_score_memory: f64,
+    min_score_files: f64,
     raw: bool,
 ) -> Result<()> {
     let client = build_client()?;
@@ -36,6 +44,8 @@ pub fn run_query(
         "query": query_text,
         "corpora": corpora,
         "limit": limit,
+        "min_score_memory": min_score_memory,
+        "min_score_files": min_score_files,
     });
 
     if let Some(pf) = path_filter {
@@ -113,7 +123,34 @@ pub fn run_query(
         }
     }
 
+    if let Some(notice) = build_hidden_memory_notice(&parsed) {
+        eprintln!("{notice}");
+    }
+
     Ok(())
+}
+
+fn build_hidden_memory_notice(parsed: &Value) -> Option<String> {
+    let hits = parsed.get("hits")?.as_array()?;
+    let available = parsed.get("available_hits_by_corpus")?.as_object()?;
+    let available_memory = available.get("memory_store")?.as_u64()? as usize;
+
+    let shown_memory = hits
+        .iter()
+        .filter(|hit| {
+            hit.get("corpus")
+                .and_then(|value| value.as_str())
+                == Some("memory_store")
+        })
+        .count();
+
+    if available_memory > shown_memory {
+        return Some(format!(
+            "Note: {available_memory} memory hit(s) matched, but only {shown_memory} are shown because the shared result limit was filled by higher-ranked hits. Try --limit <n> or --corpus memory_store."
+        ));
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -136,7 +173,7 @@ mod tests {
             .with_body(hit_response(serde_json::json!([])))
             .create();
 
-        run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, false)
+        run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, 0.5_f64, 0.05_f64, false)
             .unwrap();
         mock.assert();
     }
@@ -153,10 +190,12 @@ mod tests {
                 "query": "hello",
                 "corpora": ["files"],
                 "limit": 5,
+                "min_score_memory": 0.5,
+                "min_score_files": 0.05,
             })))
             .create();
 
-        run_query(&server.url(), "hello", &["files".to_string()], 5, None, None, None, None, false)
+        run_query(&server.url(), "hello", &["files".to_string()], 5, None, None, None, None, 0.5_f64, 0.05_f64, false)
             .unwrap();
         mock.assert();
     }
@@ -174,6 +213,8 @@ mod tests {
                 "corpora": ["all"],
                 "limit": 10,
                 "path_filter": "src/",
+                "min_score_memory": 0.5,
+                "min_score_files": 0.05,
             })))
             .create();
 
@@ -186,6 +227,8 @@ mod tests {
             None,
             None,
             None,
+            0.5_f64,
+            0.05_f64,
             false,
         )
         .unwrap();
@@ -202,13 +245,13 @@ mod tests {
             .with_body(hit_response(serde_json::json!([])))
             .create();
 
-        let result = run_query(&server.url(), "nonexistent", &["all".to_string()], 10, None, None, None, None, false);
+        let result = run_query(&server.url(), "nonexistent", &["all".to_string()], 10, None, None, None, None, 0.5_f64, 0.05_f64, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_query_connection_error_returns_err() {
-        let result = run_query("http://127.0.0.1:19998", "hello", &["all".to_string()], 10, None, None, None, None, false);
+        let result = run_query("http://127.0.0.1:19998", "hello", &["all".to_string()], 10, None, None, None, None, 0.5_f64, 0.05_f64, false);
         assert!(result.is_err());
     }
 
@@ -221,7 +264,7 @@ mod tests {
             .with_body(r#"{"detail":"oops"}"#)
             .create();
 
-        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, false);
+        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, 0.5_f64, 0.05_f64, false);
         assert!(result.is_err());
     }
 
@@ -242,7 +285,7 @@ mod tests {
             .with_body(hit_response(hits))
             .create();
 
-        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, true);
+        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, 0.5_f64, 0.05_f64, true);
         assert!(result.is_ok());
     }
 
@@ -256,7 +299,7 @@ mod tests {
             .with_body(r#"{"status":"degraded"}"#)
             .create();
 
-        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, false);
+        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, 0.5_f64, 0.05_f64, false);
         assert!(result.is_ok());
     }
 
@@ -273,6 +316,8 @@ mod tests {
                 "corpora": ["all"],
                 "limit": 10,
                 "user_id": "alice",
+                "min_score_memory": 0.5,
+                "min_score_files": 0.05,
             })))
             .create();
 
@@ -285,6 +330,8 @@ mod tests {
             None,
             None,
             Some("alice"),
+            0.5_f64,
+            0.05_f64,
             false,
         )
         .unwrap();
@@ -303,6 +350,8 @@ mod tests {
                 "query": "hello",
                 "corpora": ["all"],
                 "limit": 10,
+                "min_score_memory": 0.5,
+                "min_score_files": 0.05,
             })))
             .create();
 
@@ -315,9 +364,114 @@ mod tests {
             None,
             None,
             None,
+            0.5_f64,
+            0.05_f64,
             false,
         )
         .unwrap();
         mock.assert();
+    }
+
+    #[test]
+    fn test_query_min_score_forwarded() {
+        let mut server = Server::new();
+        let mock = server
+            .mock("POST", "/query")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(hit_response(serde_json::json!([])))
+            .match_body(mockito::Matcher::Json(serde_json::json!({
+                "query": "hello",
+                "corpora": ["all"],
+                "limit": 10,
+                "min_score_memory": 0.7,
+                "min_score_files": 0.05,
+            })))
+            .create();
+
+        run_query(
+            &server.url(),
+            "hello",
+            &["all".to_string()],
+            10,
+            None,
+            None,
+            None,
+            None,
+            0.7_f64,
+            0.05_f64,
+            false,
+        )
+        .unwrap();
+        mock.assert();
+    }
+
+    #[test]
+    fn test_query_default_min_score_included_in_payload() {
+        let mut server = Server::new();
+        let mock = server
+            .mock("POST", "/query")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(hit_response(serde_json::json!([])))
+            .match_body(mockito::Matcher::Json(serde_json::json!({
+                "query": "hello",
+                "corpora": ["all"],
+                "limit": 10,
+                "min_score_memory": 0.5,
+                "min_score_files": 0.05,
+            })))
+            .create();
+
+        run_query(
+            &server.url(),
+            "hello",
+            &["all".to_string()],
+            10,
+            None,
+            None,
+            None,
+            None,
+            0.5_f64,
+            0.05_f64,
+            false,
+        )
+        .unwrap();
+        mock.assert();
+    }
+
+    #[test]
+    fn test_hidden_memory_notice_when_shared_limit_hides_memory_hits() {
+        let parsed = serde_json::json!({
+            "hits": [
+                {"corpus": "file_corpus"},
+                {"corpus": "file_corpus"}
+            ],
+            "available_hits_by_corpus": {
+                "file_corpus": 2,
+                "memory_store": 1
+            }
+        });
+
+        let notice = build_hidden_memory_notice(&parsed);
+
+        assert!(notice.is_some());
+        assert!(notice.unwrap().contains("memory hit"));
+    }
+
+    #[test]
+    fn test_hidden_memory_notice_absent_when_all_memory_hits_are_shown() {
+        let parsed = serde_json::json!({
+            "hits": [
+                {"corpus": "memory_store"},
+                {"corpus": "file_corpus"}
+            ],
+            "available_hits_by_corpus": {
+                "file_corpus": 1,
+                "memory_store": 1
+            }
+        });
+
+        assert!(build_hidden_memory_notice(&parsed).is_none());
     }
 }

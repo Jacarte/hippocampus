@@ -68,6 +68,7 @@ def test_unified_query_response_valid():
         total=0,
         corpora_queried=["memory_store"],
     )
+    assert resp.available_hits_by_corpus == {}
     assert resp.degraded is False
     assert resp.degradation_reasons == []
 
@@ -79,7 +80,9 @@ def test_index_sync_request_valid():
 
 def test_index_sync_response_valid():
     now = datetime.now(timezone.utc)
-    resp = IndexSyncResponse(root="/workspace", files_indexed=3, chunks_indexed=12, synced_at=now)
+    resp = IndexSyncResponse(
+        root="/workspace", files_indexed=3, chunks_indexed=12, synced_at=now
+    )
     assert resp.files_indexed == 3
 
 

@@ -33,6 +33,12 @@ pub enum Commands {
         /// Scope memory-corpus results to a specific user identifier.
         #[arg(long)]
         user_id: Option<String>,
+        /// Minimum relevance score for memory-store hits (0.0–1.0). Default: 0.5.
+        #[arg(long, default_value = "0.5")]
+        min_score_memory: f64,
+        /// Minimum relevance score for file-corpus hits (0.0–1.0). Default: 0.05.
+        #[arg(long, default_value = "0.05")]
+        min_score_files: f64,
         #[arg(long)]
         raw: bool,
     },
@@ -107,6 +113,8 @@ async fn main() -> anyhow::Result<()> {
             language_filter,
             scope_filter,
             user_id,
+            min_score_memory,
+            min_score_files,
             raw,
         } => {
             let base = resolve_base_url(&url);
@@ -120,6 +128,8 @@ async fn main() -> anyhow::Result<()> {
                 language_filter.as_deref(),
                 scope_filter.as_deref(),
                 Some(&resolved_user_id),
+                min_score_memory,
+                min_score_files,
                 raw,
             )?;
         }

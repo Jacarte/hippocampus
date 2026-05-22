@@ -1,0 +1,27 @@
+.................................                                        [100%]
+=============================== warnings summary ===============================
+tests/test_server.py: 32 warnings
+  /Users/javcab/mem0server/server.py:117: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+tests/test_server.py: 32 warnings
+  /Users/javcab/.pyenv/versions/3.10.16/lib/python3.10/site-packages/fastapi/applications.py:4573: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)
+
+tests/test_server.py::test_index_sync_accepts_generate_summaries_flag
+tests/test_server.py::test_index_sync_legacy_payload_without_generate_summaries
+  /Users/javcab/.pyenv/versions/3.10.16/lib/python3.10/site-packages/tree_sitter/__init__.py:36: FutureWarning: Language(path, name) is deprecated. Use Language(ptr, name) instead.
+    warn("{} is deprecated. Use {} instead.".format(old, new), FutureWarning)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+33 passed, 66 warnings in 1.71s
