@@ -68,7 +68,7 @@ class MemoryHit(BaseModel):
     content: str
     score: float
     corpus: str = "memory_store"
-    metadata: dict | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class UnifiedQueryRequest(BaseModel):
@@ -113,6 +113,7 @@ class UnifiedQueryResponse(BaseModel):
     hits: list[FileHit | MemoryHit]
     total: int
     corpora_queried: list[str]
+    available_hits_by_corpus: dict[str, int] = Field(default_factory=dict)
     degraded: bool = False
     degradation_reasons: list[str] = []
 
@@ -136,7 +137,7 @@ class IndexSyncResponse(BaseModel):
 
 
 class IndexStatusResponse(BaseModel):
-    roots: list[dict]
+    roots: list[dict[str, Any]]
     total_files: int
     total_chunks: int
 

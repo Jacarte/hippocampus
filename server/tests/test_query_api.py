@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from services.file_corpus_service import FileCorpusService
 from services.query_service import QueryService
+from services.retrieval_service import RetrievalService
 
 
 class FakeRetrieval:
@@ -21,6 +22,45 @@ class FakeRetrieval:
 class ErrorRetrieval:
     def search(self, memory_instance: Any, **_kwargs: Any) -> list[dict[str, Any]]:
         raise RuntimeError("memory unavailable")
+
+
+class FakeMemoryBackend:
+    def __init__(self, results: list[dict[str, Any]]) -> None:
+        self._results = results
+        self.last_search_kwargs: dict[str, Any] | None = None
+
+    def search(
+        self,
+        query: str,
+        *,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+        limit: int = 100,
+        filters: dict[str, Any] | None = None,
+        threshold: float | None = None,
+        rerank: bool = True,
+    ) -> dict[str, Any]:
+        self.last_search_kwargs = {
+            "query": query,
+            "user_id": user_id,
+            "agent_id": agent_id,
+            "run_id": run_id,
+            "limit": limit,
+            "filters": filters,
+            "threshold": threshold,
+            "rerank": rerank,
+        }
+        return {"results": self._results}
+
+    def get_all(
+        self,
+        *,
+        user_id: str | None = None,
+        run_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._results
 
 
 def _make_corpus_with_chunks() -> FileCorpusService:
@@ -59,6 +99,15 @@ def _fake_memory_result() -> dict[str, Any]:
     }
 
 
+def _fake_mem0_search_result() -> dict[str, Any]:
+    return {
+        "id": "mem-1",
+        "memory": "hello from memory",
+        "score": 0.9,
+        "metadata": None,
+    }
+
+
 def test_query_returns_fused_results() -> None:
     corpus = _make_corpus_with_chunks()
     retrieval = FakeRetrieval([_fake_memory_result()])
@@ -67,6 +116,10 @@ def test_query_returns_fused_results() -> None:
     result = svc.query("hello", corpora=["all"], memory_instance=object())
 
     assert result["total"] == 3
+    assert result["available_hits_by_corpus"] == {
+        "file_corpus": 2,
+        "memory_store": 1,
+    }
     assert len(result["hits"]) == 3
     corpora_in_hits = {h["corpus"] for h in result["hits"]}
     assert "file_corpus" in corpora_in_hits
@@ -97,6 +150,87 @@ def test_query_memory_only() -> None:
     assert result["hits"][0]["corpus"] == "memory_store"
     assert result["hits"][0]["memory_id"] == "mem-1"
     assert result["corpora_queried"] == ["memory_store"]
+
+
+def test_query_memory_store_works_with_real_retrieval_service() -> None:
+    corpus = _make_corpus_with_chunks()
+    memory_backend = FakeMemoryBackend([_fake_mem0_search_result()])
+    svc = QueryService(corpus=corpus, retrieval_service=RetrievalService())
+
+    result = svc.query(
+        "hello", corpora=["memory_store"], memory_instance=memory_backend
+    )
+
+    assert result["degraded"] is False
+    assert result["degradation_reasons"] == []
+    assert result["available_hits_by_corpus"] == {"memory_store": 1}
+    assert len(result["hits"]) == 1
+    assert result["hits"][0]["corpus"] == "memory_store"
+    assert memory_backend.last_search_kwargs is not None
+    assert memory_backend.last_search_kwargs["limit"] == 10
+
+
+def test_query_memory_store_forwards_custom_limit_to_real_retrieval_service() -> None:
+    corpus = _make_corpus_with_chunks()
+    memory_backend = FakeMemoryBackend([_fake_mem0_search_result()])
+    svc = QueryService(corpus=corpus, retrieval_service=RetrievalService())
+
+    result = svc.query(
+        "hello",
+        corpora=["memory_store"],
+        memory_instance=memory_backend,
+        limit=3,
+    )
+
+    assert result["hits"][0]["corpus"] == "memory_store"
+    assert memory_backend.last_search_kwargs is not None
+    assert memory_backend.last_search_kwargs["limit"] == 3
+
+
+def test_query_reports_hidden_memory_hits_when_shared_limit_keeps_only_files() -> None:
+    corpus = FileCorpusService()
+    corpus.upsert_chunks(
+        root="/repo",
+        file_path="foo.py",
+        chunks=[
+            {
+                "language": "python",
+                "symbol_name": f"func_{i}",
+                "symbol_kind": "function",
+                "line_start": i,
+                "line_end": i,
+                "content": "alpha beta gamma",
+            }
+            for i in range(1, 13)
+        ],
+    )
+    memory_backend = FakeMemoryBackend(
+        [
+            {
+                "id": "mem-1",
+                "memory": "alpha memory",
+                "score": 0.6,
+                "metadata": None,
+            }
+        ]
+    )
+    svc = QueryService(corpus=corpus, retrieval_service=RetrievalService())
+
+    result = svc.query(
+        "alpha",
+        corpora=["all"],
+        memory_instance=memory_backend,
+        limit=10,
+        min_score_memory=0.0,
+        min_score_files=0.0,
+    )
+
+    assert result["available_hits_by_corpus"] == {
+        "file_corpus": 10,
+        "memory_store": 1,
+    }
+    assert len(result["hits"]) == 10
+    assert all(hit["corpus"] == "file_corpus" for hit in result["hits"])
 
 
 def test_query_degrades_gracefully_on_file_corpus_error() -> None:
@@ -181,7 +315,9 @@ def test_chunk_memory_disabled_returns_lexical_only() -> None:
     svc = QueryService(corpus=corpus, retrieval_service=retrieval)
 
     result_without_flag = svc.query("hello", corpora=["file_corpus"])
-    result_flag_off = svc.query("hello", corpora=["file_corpus"], chunk_memory_enabled=False)
+    result_flag_off = svc.query(
+        "hello", corpora=["file_corpus"], chunk_memory_enabled=False
+    )
 
     assert result_without_flag["hits"] == result_flag_off["hits"]
     assert result_without_flag["total"] == result_flag_off["total"]
@@ -223,7 +359,9 @@ def test_chunk_memory_summary_error_falls_back_to_lexical() -> None:
     """If summary retrieval raises, result is not degraded and falls back to lexical."""
 
     class BustedSummaryCorpus(FileCorpusService):
-        def query_with_summaries(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:  # type: ignore[override]
+        def query_with_summaries(
+            self, *args: Any, **kwargs: Any
+        ) -> list[dict[str, Any]]:  # type: ignore[override]
             raise RuntimeError("embedding service down")
 
     corpus = BustedSummaryCorpus()
@@ -352,13 +490,28 @@ def test_query_filters_hits_below_min_score() -> None:
             },
         ],
     )
-    low_mem = {"id": "mem-low", "memory": "threshold test low", "_retrieval": {"score": 0.3}, "metadata": None}
-    ok_mem = {"id": "mem-ok", "memory": "threshold test ok", "_retrieval": {"score": 0.5}, "metadata": None}
+    low_mem = {
+        "id": "mem-low",
+        "memory": "threshold test low",
+        "_retrieval": {"score": 0.3},
+        "metadata": None,
+    }
+    ok_mem = {
+        "id": "mem-ok",
+        "memory": "threshold test ok",
+        "_retrieval": {"score": 0.5},
+        "metadata": None,
+    }
 
     retrieval = FakeRetrieval([low_mem, ok_mem])
     svc = QueryService(corpus=corpus, retrieval_service=retrieval)
 
-    result = svc.query("threshold test", corpora=["memory_store"], min_score_memory=0.5, memory_instance=object())
+    result = svc.query(
+        "threshold test",
+        corpora=["memory_store"],
+        min_score_memory=0.5,
+        memory_instance=object(),
+    )
 
     scores = [h["score"] for h in result["hits"]]
     assert all(s >= 0.5 for s in scores), f"Expected all scores >= 0.5, got {scores}"
@@ -368,12 +521,21 @@ def test_query_filters_hits_below_min_score() -> None:
 
 def test_query_all_filtered_returns_empty_hits() -> None:
     """When every hit is below min_score, hits must be an empty list."""
-    retrieval = FakeRetrieval([
-        {"id": "m1", "memory": "low", "_retrieval": {"score": 0.1}, "metadata": None},
-    ])
+    retrieval = FakeRetrieval(
+        [
+            {
+                "id": "m1",
+                "memory": "low",
+                "_retrieval": {"score": 0.1},
+                "metadata": None,
+            },
+        ]
+    )
     svc = QueryService(corpus=FileCorpusService(), retrieval_service=retrieval)
 
-    result = svc.query("low", corpora=["memory_store"], min_score_memory=0.9, memory_instance=object())
+    result = svc.query(
+        "low", corpora=["memory_store"], min_score_memory=0.9, memory_instance=object()
+    )
 
     assert result["hits"] == []
     assert result["total"] == 1  # total reflects pre-filter count
@@ -385,15 +547,31 @@ def test_query_min_score_zero_returns_all_hits() -> None:
     retrieval = FakeRetrieval([_fake_memory_result()])
     svc = QueryService(corpus=corpus, retrieval_service=retrieval)
 
-    result = svc.query("hello", corpora=["all"], min_score_memory=0.0, min_score_files=0.0, memory_instance=object())
+    result = svc.query(
+        "hello",
+        corpora=["all"],
+        min_score_memory=0.0,
+        min_score_files=0.0,
+        memory_instance=object(),
+    )
 
     assert len(result["hits"]) == 3  # all three survive
 
 
 def test_query_default_min_score_is_0_5() -> None:
     """Calling query() without min_score must apply the 0.5 default."""
-    low_mem = {"id": "low", "memory": "hello low", "_retrieval": {"score": 0.2}, "metadata": None}
-    high_mem = {"id": "high", "memory": "hello high", "_retrieval": {"score": 0.8}, "metadata": None}
+    low_mem = {
+        "id": "low",
+        "memory": "hello low",
+        "_retrieval": {"score": 0.2},
+        "metadata": None,
+    }
+    high_mem = {
+        "id": "high",
+        "memory": "hello high",
+        "_retrieval": {"score": 0.8},
+        "metadata": None,
+    }
     retrieval = FakeRetrieval([low_mem, high_mem])
     svc = QueryService(corpus=FileCorpusService(), retrieval_service=retrieval)
 
@@ -427,8 +605,12 @@ def test_query_files_filtered_by_min_score_files() -> None:
     retrieval = FakeRetrieval([])
     svc = QueryService(corpus=corpus, retrieval_service=retrieval)
 
-    result_all = svc.query("threshold file test", corpora=["file_corpus"], min_score_files=0.0)
-    result_none = svc.query("threshold file test", corpora=["file_corpus"], min_score_files=0.9)
+    result_all = svc.query(
+        "threshold file test", corpora=["file_corpus"], min_score_files=0.0
+    )
+    result_none = svc.query(
+        "threshold file test", corpora=["file_corpus"], min_score_files=0.9
+    )
 
     assert len(result_all["hits"]) >= 1
     assert result_none["hits"] == []
@@ -444,4 +626,6 @@ def test_query_default_min_score_files_is_0_05() -> None:
     result = svc.query("zzz_no_match_at_all", corpora=["file_corpus"])
     # All hits should have score >= 0.05 (any zero-score hits are excluded)
     for h in result["hits"]:
-        assert h["score"] >= 0.05, f"File hit score {h['score']} below default min_score_files=0.05"
+        assert h["score"] >= 0.05, (
+            f"File hit score {h['score']} below default min_score_files=0.05"
+        )

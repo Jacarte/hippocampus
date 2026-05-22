@@ -123,7 +123,34 @@ pub fn run_query(
         }
     }
 
+    if let Some(notice) = build_hidden_memory_notice(&parsed) {
+        eprintln!("{notice}");
+    }
+
     Ok(())
+}
+
+fn build_hidden_memory_notice(parsed: &Value) -> Option<String> {
+    let hits = parsed.get("hits")?.as_array()?;
+    let available = parsed.get("available_hits_by_corpus")?.as_object()?;
+    let available_memory = available.get("memory_store")?.as_u64()? as usize;
+
+    let shown_memory = hits
+        .iter()
+        .filter(|hit| {
+            hit.get("corpus")
+                .and_then(|value| value.as_str())
+                == Some("memory_store")
+        })
+        .count();
+
+    if available_memory > shown_memory {
+        return Some(format!(
+            "Note: {available_memory} memory hit(s) matched, but only {shown_memory} are shown because the shared result limit was filled by higher-ranked hits. Try --limit <n> or --corpus memory_store."
+        ));
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -411,5 +438,40 @@ mod tests {
         )
         .unwrap();
         mock.assert();
+    }
+
+    #[test]
+    fn test_hidden_memory_notice_when_shared_limit_hides_memory_hits() {
+        let parsed = serde_json::json!({
+            "hits": [
+                {"corpus": "file_corpus"},
+                {"corpus": "file_corpus"}
+            ],
+            "available_hits_by_corpus": {
+                "file_corpus": 2,
+                "memory_store": 1
+            }
+        });
+
+        let notice = build_hidden_memory_notice(&parsed);
+
+        assert!(notice.is_some());
+        assert!(notice.unwrap().contains("memory hit"));
+    }
+
+    #[test]
+    fn test_hidden_memory_notice_absent_when_all_memory_hits_are_shown() {
+        let parsed = serde_json::json!({
+            "hits": [
+                {"corpus": "memory_store"},
+                {"corpus": "file_corpus"}
+            ],
+            "available_hits_by_corpus": {
+                "file_corpus": 1,
+                "memory_store": 1
+            }
+        });
+
+        assert!(build_hidden_memory_notice(&parsed).is_none());
     }
 }

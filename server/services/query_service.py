@@ -4,6 +4,7 @@ Queries the memory store and/or file/doc corpus independently, normalises
 results to shared hit shapes, fuses them into one ranked response, and
 reports truthful provenance and degradation.
 """
+
 from __future__ import annotations
 
 import logging
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 from api_models import FileHit, MemoryHit, UnifiedQueryResponse
 from services.file_corpus_service import FileCorpusService
+
 
 class QueryService:
     """Fuses results from the memory store and the file corpus."""
@@ -84,11 +86,17 @@ class QueryService:
         """
         expanded: list[str] = _expand_corpora(corpora)
 
-        if chunk_memory_enabled and query_embedding is None and memory_instance is not None:
+        if (
+            chunk_memory_enabled
+            and query_embedding is None
+            and memory_instance is not None
+        ):
             try:
                 query_embedding = memory_instance.embedding_model.embed(query_text)
             except Exception as exc:
-                logger.warning("Failed to embed query for chunk-memory retrieval: %s", exc)
+                logger.warning(
+                    "Failed to embed query for chunk-memory retrieval: %s", exc
+                )
 
         all_hits: list[FileHit | MemoryHit] = []
         corpora_queried: list[str] = []
@@ -116,7 +124,12 @@ class QueryService:
             corpora_queried.append("memory_store")
             try:
                 all_hits.extend(
-                    self._query_memory_store(query_text, limit=limit, user_id=user_id, memory_instance=memory_instance)
+                    self._query_memory_store(
+                        query_text,
+                        limit=limit,
+                        user_id=user_id,
+                        memory_instance=memory_instance,
+                    )
                 )
             except Exception as exc:  # noqa: BLE001
                 degraded = True
@@ -124,16 +137,19 @@ class QueryService:
 
         all_hits.sort(key=lambda h: h.score, reverse=True)
         filtered = [
-            h for h in all_hits
+            h
+            for h in all_hits
             if (h.corpus == "memory_store" and h.score >= min_score_memory)
             or (h.corpus == "file_corpus" and h.score >= min_score_files)
         ]
+        available_hits_by_corpus = self._count_hits_by_corpus(filtered)
         truncated = filtered[:limit]
 
         return UnifiedQueryResponse(
             hits=truncated,
             total=len(all_hits),
             corpora_queried=corpora_queried,
+            available_hits_by_corpus=available_hits_by_corpus,
             degraded=degraded,
             degradation_reasons=degradation_reasons,
         ).model_dump()
@@ -222,20 +238,55 @@ class QueryService:
         if user_id is not None:
             kwargs["user_id"] = user_id
 
-        raw: list[dict[str, Any]] = self._retrieval.search(memory_instance, **kwargs)
+        raw_response = self._retrieval.search(memory_instance, **kwargs)
+        raw = self._coerce_memory_results(raw_response)
 
         return [
             MemoryHit.model_validate(
                 {
                     "memory_id": str(result.get("id", "")),
                     "content": result.get("memory", ""),
-                    "score": float((result.get("_retrieval") or {}).get("score", 0.0)),
+                    "score": self._coerce_memory_score(result),
                     "corpus": "memory_store",
                     "metadata": result.get("metadata"),
                 }
             )
             for result in raw
         ]
+
+    @staticmethod
+    def _coerce_memory_results(raw_response: Any) -> list[dict[str, Any]]:
+        if isinstance(raw_response, list):
+            return [record for record in raw_response if isinstance(record, dict)]
+        if isinstance(raw_response, dict):
+            results = raw_response.get("results")
+            if isinstance(results, list):
+                return [record for record in results if isinstance(record, dict)]
+        raise TypeError(
+            "Memory retrieval response must be a list or dict containing 'results'."
+        )
+
+    @staticmethod
+    def _coerce_memory_score(result: dict[str, Any]) -> float:
+        top_level_score = result.get("score")
+        if isinstance(top_level_score, (int, float)):
+            return float(top_level_score)
+
+        retrieval_metadata = result.get("_retrieval")
+        if isinstance(retrieval_metadata, dict):
+            nested_score = retrieval_metadata.get("score")
+            if isinstance(nested_score, (int, float)):
+                return float(nested_score)
+
+        return 0.0
+
+    @staticmethod
+    def _count_hits_by_corpus(hits: list[FileHit | MemoryHit]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for hit in hits:
+            counts[hit.corpus] = counts.get(hit.corpus, 0) + 1
+        return counts
+
 
 def _expand_corpora(corpora: list[str]) -> list[str]:
     if "all" in corpora:

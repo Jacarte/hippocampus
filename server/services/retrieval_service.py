@@ -39,6 +39,7 @@ class RetrievalService:
         memory_instance: Any,
         *,
         query: str,
+        limit: int | None = None,
         user_id: str | None = None,
         run_id: str | None = None,
         agent_id: str | None = None,
@@ -50,6 +51,8 @@ class RetrievalService:
             agent_id=agent_id,
             filters=filters,
         )
+        if limit is not None:
+            params["limit"] = limit
         with stage_timer() as total_elapsed_ms:
             semantic_response, semantic_latency_ms, semantic_degraded = (
                 self._semantic_search(
