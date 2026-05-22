@@ -18,6 +18,10 @@ use crate::output::{print_json, print_no_results};
 ///   payload.  When `Some`, the server scopes memory-corpus results to that
 ///   user.  When `None`, the field is omitted and the server applies its
 ///   default (no per-user scoping).
+/// * `min_score_memory` - Minimum relevance score for memory-store hits forwarded to the server.
+///   Defaults to `0.5`.
+/// * `min_score_files` - Minimum relevance score for file-corpus hits forwarded to the server.
+///   Defaults to `0.05`.
 /// * `raw` - When `true`, print raw JSON instead of formatted hits.
 pub fn run_query(
     base_url: &str,
@@ -28,6 +32,8 @@ pub fn run_query(
     language_filter: Option<&str>,
     scope_filter: Option<&str>,
     user_id: Option<&str>,
+    min_score_memory: f64,
+    min_score_files: f64,
     raw: bool,
 ) -> Result<()> {
     let client = build_client()?;
@@ -36,6 +42,8 @@ pub fn run_query(
         "query": query_text,
         "corpora": corpora,
         "limit": limit,
+        "min_score_memory": min_score_memory,
+        "min_score_files": min_score_files,
     });
 
     if let Some(pf) = path_filter {
@@ -136,7 +144,7 @@ mod tests {
             .with_body(hit_response(serde_json::json!([])))
             .create();
 
-        run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, false)
+        run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, 0.5_f64, 0.05_f64, false)
             .unwrap();
         mock.assert();
     }
@@ -153,10 +161,12 @@ mod tests {
                 "query": "hello",
                 "corpora": ["files"],
                 "limit": 5,
+                "min_score_memory": 0.5,
+                "min_score_files": 0.05,
             })))
             .create();
 
-        run_query(&server.url(), "hello", &["files".to_string()], 5, None, None, None, None, false)
+        run_query(&server.url(), "hello", &["files".to_string()], 5, None, None, None, None, 0.5_f64, 0.05_f64, false)
             .unwrap();
         mock.assert();
     }
@@ -174,6 +184,8 @@ mod tests {
                 "corpora": ["all"],
                 "limit": 10,
                 "path_filter": "src/",
+                "min_score_memory": 0.5,
+                "min_score_files": 0.05,
             })))
             .create();
 
@@ -186,6 +198,8 @@ mod tests {
             None,
             None,
             None,
+            0.5_f64,
+            0.05_f64,
             false,
         )
         .unwrap();
@@ -202,13 +216,13 @@ mod tests {
             .with_body(hit_response(serde_json::json!([])))
             .create();
 
-        let result = run_query(&server.url(), "nonexistent", &["all".to_string()], 10, None, None, None, None, false);
+        let result = run_query(&server.url(), "nonexistent", &["all".to_string()], 10, None, None, None, None, 0.5_f64, 0.05_f64, false);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_query_connection_error_returns_err() {
-        let result = run_query("http://127.0.0.1:19998", "hello", &["all".to_string()], 10, None, None, None, None, false);
+        let result = run_query("http://127.0.0.1:19998", "hello", &["all".to_string()], 10, None, None, None, None, 0.5_f64, 0.05_f64, false);
         assert!(result.is_err());
     }
 
@@ -221,7 +235,7 @@ mod tests {
             .with_body(r#"{"detail":"oops"}"#)
             .create();
 
-        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, false);
+        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, 0.5_f64, 0.05_f64, false);
         assert!(result.is_err());
     }
 
@@ -242,7 +256,7 @@ mod tests {
             .with_body(hit_response(hits))
             .create();
 
-        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, true);
+        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, 0.5_f64, 0.05_f64, true);
         assert!(result.is_ok());
     }
 
@@ -256,7 +270,7 @@ mod tests {
             .with_body(r#"{"status":"degraded"}"#)
             .create();
 
-        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, false);
+        let result = run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, 0.5_f64, 0.05_f64, false);
         assert!(result.is_ok());
     }
 
@@ -273,6 +287,8 @@ mod tests {
                 "corpora": ["all"],
                 "limit": 10,
                 "user_id": "alice",
+                "min_score_memory": 0.5,
+                "min_score_files": 0.05,
             })))
             .create();
 
@@ -285,6 +301,8 @@ mod tests {
             None,
             None,
             Some("alice"),
+            0.5_f64,
+            0.05_f64,
             false,
         )
         .unwrap();
@@ -303,6 +321,8 @@ mod tests {
                 "query": "hello",
                 "corpora": ["all"],
                 "limit": 10,
+                "min_score_memory": 0.5,
+                "min_score_files": 0.05,
             })))
             .create();
 
@@ -315,6 +335,76 @@ mod tests {
             None,
             None,
             None,
+            0.5_f64,
+            0.05_f64,
+            false,
+        )
+        .unwrap();
+        mock.assert();
+    }
+
+    #[test]
+    fn test_query_min_score_forwarded() {
+        let mut server = Server::new();
+        let mock = server
+            .mock("POST", "/query")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(hit_response(serde_json::json!([])))
+            .match_body(mockito::Matcher::Json(serde_json::json!({
+                "query": "hello",
+                "corpora": ["all"],
+                "limit": 10,
+                "min_score_memory": 0.7,
+                "min_score_files": 0.05,
+            })))
+            .create();
+
+        run_query(
+            &server.url(),
+            "hello",
+            &["all".to_string()],
+            10,
+            None,
+            None,
+            None,
+            None,
+            0.7_f64,
+            0.05_f64,
+            false,
+        )
+        .unwrap();
+        mock.assert();
+    }
+
+    #[test]
+    fn test_query_default_min_score_included_in_payload() {
+        let mut server = Server::new();
+        let mock = server
+            .mock("POST", "/query")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(hit_response(serde_json::json!([])))
+            .match_body(mockito::Matcher::Json(serde_json::json!({
+                "query": "hello",
+                "corpora": ["all"],
+                "limit": 10,
+                "min_score_memory": 0.5,
+                "min_score_files": 0.05,
+            })))
+            .create();
+
+        run_query(
+            &server.url(),
+            "hello",
+            &["all".to_string()],
+            10,
+            None,
+            None,
+            None,
+            None,
+            0.5_f64,
+            0.05_f64,
             false,
         )
         .unwrap();
