@@ -37,7 +37,8 @@ class QueryService:
         chunk_memory_enabled: bool = False,
         query_embedding: list[float] | None = None,
         memory_instance: Any | None = None,
-        min_score: float = 0.5,
+        min_score_memory: float = 0.5,
+        min_score_files: float = 0.05,
     ) -> dict[str, Any]:
         """Execute a fused cross-corpus query.
 
@@ -66,10 +67,11 @@ class QueryService:
                 If embedding derivation fails, a warning is logged and the
                 query falls back to lexical-only results.  Ignored when
                 *chunk_memory_enabled* is ``False``.
-            min_score: Minimum score threshold applied after sorting.  Hits with
-                a score strictly below *min_score* are excluded before the
-                result is truncated to *limit*.  Defaults to ``0.5``.  Set to
-                ``0.0`` to return all hits regardless of score.
+            min_score_memory: Minimum score threshold for memory-store hits.
+                Defaults to ``0.5``.
+            min_score_files: Minimum score threshold for file-corpus hits.
+                Defaults to ``0.05`` (BM25 noise floor).  Set to ``0.0`` to
+                return all file hits regardless of score.
 
         Returns:
             A dict matching the UnifiedQueryResponse shape containing
@@ -116,7 +118,11 @@ class QueryService:
                 degradation_reasons.append(f"memory_store: {exc}")
 
         all_hits.sort(key=lambda h: h.score, reverse=True)
-        filtered = [h for h in all_hits if h.corpus != "memory_store" or h.score >= min_score]
+        filtered = [
+            h for h in all_hits
+            if (h.corpus == "memory_store" and h.score >= min_score_memory)
+            or (h.corpus == "file_corpus" and h.score >= min_score_files)
+        ]
         truncated = filtered[:limit]
 
         return UnifiedQueryResponse(

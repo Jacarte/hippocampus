@@ -85,14 +85,25 @@ class UnifiedQueryRequest(BaseModel):
             "per-user scoping.  When omitted the server applies no user filter."
         ),
     )
-    min_score: float = Field(
+    min_score_memory: float = Field(
         default=0.5,
         ge=0.0,
         le=1.0,
         description=(
-            "Minimum relevance score threshold.  Hits with a score strictly "
-            "below this value are excluded from the response.  Defaults to "
-            "0.5.  Set to 0.0 to disable filtering."
+            "Minimum relevance score for memory-store hits.  Hits from the "
+            "memory corpus with a score strictly below this value are excluded. "
+            "Defaults to 0.5.  Set to 0.0 to disable filtering for this corpus."
+        ),
+    )
+    min_score_files: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum relevance score for file-corpus hits.  Hits from the file "
+            "corpus with a score strictly below this value are excluded. "
+            "Defaults to 0.05 (matches typical BM25 noise floor).  "
+            "Set to 0.0 to disable filtering for this corpus."
         ),
     )
 

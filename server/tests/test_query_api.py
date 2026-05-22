@@ -358,7 +358,7 @@ def test_query_filters_hits_below_min_score() -> None:
     retrieval = FakeRetrieval([low_mem, ok_mem])
     svc = QueryService(corpus=corpus, retrieval_service=retrieval)
 
-    result = svc.query("threshold test", corpora=["memory_store"], min_score=0.5, memory_instance=object())
+    result = svc.query("threshold test", corpora=["memory_store"], min_score_memory=0.5, memory_instance=object())
 
     scores = [h["score"] for h in result["hits"]]
     assert all(s >= 0.5 for s in scores), f"Expected all scores >= 0.5, got {scores}"
@@ -373,7 +373,7 @@ def test_query_all_filtered_returns_empty_hits() -> None:
     ])
     svc = QueryService(corpus=FileCorpusService(), retrieval_service=retrieval)
 
-    result = svc.query("low", corpora=["memory_store"], min_score=0.9, memory_instance=object())
+    result = svc.query("low", corpora=["memory_store"], min_score_memory=0.9, memory_instance=object())
 
     assert result["hits"] == []
     assert result["total"] == 1  # total reflects pre-filter count
@@ -385,7 +385,7 @@ def test_query_min_score_zero_returns_all_hits() -> None:
     retrieval = FakeRetrieval([_fake_memory_result()])
     svc = QueryService(corpus=corpus, retrieval_service=retrieval)
 
-    result = svc.query("hello", corpora=["all"], min_score=0.0, memory_instance=object())
+    result = svc.query("hello", corpora=["all"], min_score_memory=0.0, min_score_files=0.0, memory_instance=object())
 
     assert len(result["hits"]) == 3  # all three survive
 
@@ -402,3 +402,46 @@ def test_query_default_min_score_is_0_5() -> None:
     ids = [h["memory_id"] for h in result["hits"]]
     assert "high" in ids
     assert "low" not in ids
+
+
+def test_query_files_filtered_by_min_score_files() -> None:
+    """File hits below min_score_files must be excluded."""
+    corpus = FileCorpusService()
+    corpus.upsert_chunks(
+        root="/repo",
+        file_path="baz.py",
+        chunks=[
+            {
+                "language": "python",
+                "symbol_name": "high_func",
+                "symbol_kind": "function",
+                "line_start": 1,
+                "line_end": 3,
+                "content": (
+                    "threshold file test extra padding words to dilute the tf score "
+                    "so it stays well below half and we can filter it reliably"
+                ),
+            },
+        ],
+    )
+    retrieval = FakeRetrieval([])
+    svc = QueryService(corpus=corpus, retrieval_service=retrieval)
+
+    result_all = svc.query("threshold file test", corpora=["file_corpus"], min_score_files=0.0)
+    result_none = svc.query("threshold file test", corpora=["file_corpus"], min_score_files=0.9)
+
+    assert len(result_all["hits"]) >= 1
+    assert result_none["hits"] == []
+
+
+def test_query_default_min_score_files_is_0_05() -> None:
+    """Default min_score_files=0.05 filters file hits with score < 0.05."""
+    corpus = FileCorpusService()
+    retrieval = FakeRetrieval([])
+    svc = QueryService(corpus=corpus, retrieval_service=retrieval)
+
+    # Query for something with no match → score will be 0 or very low → filtered by default 0.05
+    result = svc.query("zzz_no_match_at_all", corpora=["file_corpus"])
+    # All hits should have score >= 0.05 (any zero-score hits are excluded)
+    for h in result["hits"]:
+        assert h["score"] >= 0.05, f"File hit score {h['score']} below default min_score_files=0.05"

@@ -282,7 +282,8 @@ def create_app(
                 chunk_memory_enabled=chunk_memory_enabled,
                 memory_instance=memory_instance,
                 user_id=query_req.user_id,
-                min_score=query_req.min_score,
+                min_score_memory=query_req.min_score_memory,
+                min_score_files=query_req.min_score_files,
             ),
         )
 
