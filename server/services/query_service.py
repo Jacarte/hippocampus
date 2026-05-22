@@ -67,9 +67,14 @@ class QueryService:
                 If embedding derivation fails, a warning is logged and the
                 query falls back to lexical-only results.  Ignored when
                 *chunk_memory_enabled* is ``False``.
-            min_score_memory: Minimum score threshold for memory-store hits.
-                Defaults to ``0.5``.
-            min_score_files: Minimum score threshold for file-corpus hits.
+            min_score_memory: Minimum score threshold (range 0.0–1.0) for
+                memory-store hits.  Hits with a score strictly below this value
+                are excluded before the result is truncated to *limit*.
+                Defaults to ``0.5``.  Set to ``0.0`` to return all memory hits
+                regardless of score.
+            min_score_files: Minimum score threshold (range 0.0–1.0) for
+                file-corpus hits.  Hits with a score strictly below this value
+                are excluded before the result is truncated to *limit*.
                 Defaults to ``0.05`` (BM25 noise floor).  Set to ``0.0`` to
                 return all file hits regardless of score.
 

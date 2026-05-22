@@ -18,10 +18,12 @@ use crate::output::{print_json, print_no_results};
 ///   payload.  When `Some`, the server scopes memory-corpus results to that
 ///   user.  When `None`, the field is omitted and the server applies its
 ///   default (no per-user scoping).
-/// * `min_score_memory` - Minimum relevance score for memory-store hits forwarded to the server.
-///   Defaults to `0.5`.
-/// * `min_score_files` - Minimum relevance score for file-corpus hits forwarded to the server.
-///   Defaults to `0.05`.
+/// * `min_score_memory` - Minimum relevance score (0.0–1.0) for memory-store hits forwarded to
+///   the server.  Hits with a score strictly below this value are excluded.  Defaults to `0.5`.
+///   Set to `0.0` to disable memory-hit filtering.
+/// * `min_score_files` - Minimum relevance score (0.0–1.0) for file-corpus hits forwarded to
+///   the server.  Hits with a score strictly below this value are excluded.  Defaults to `0.05`
+///   (BM25 noise floor).  Set to `0.0` to disable file-hit filtering.
 /// * `raw` - When `true`, print raw JSON instead of formatted hits.
 pub fn run_query(
     base_url: &str,

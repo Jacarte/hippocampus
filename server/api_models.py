@@ -90,9 +90,10 @@ class UnifiedQueryRequest(BaseModel):
         ge=0.0,
         le=1.0,
         description=(
-            "Minimum relevance score for memory-store hits.  Hits from the "
-            "memory corpus with a score strictly below this value are excluded. "
-            "Defaults to 0.5.  Set to 0.0 to disable filtering for this corpus."
+            "Minimum relevance score for memory-store hits (range 0.0–1.0).  "
+            "Hits from the memory corpus with a score strictly below this value "
+            "are excluded.  Defaults to 0.5.  Set to 0.0 to disable filtering "
+            "for this corpus."
         ),
     )
     min_score_files: float = Field(
@@ -100,9 +101,9 @@ class UnifiedQueryRequest(BaseModel):
         ge=0.0,
         le=1.0,
         description=(
-            "Minimum relevance score for file-corpus hits.  Hits from the file "
-            "corpus with a score strictly below this value are excluded. "
-            "Defaults to 0.05 (matches typical BM25 noise floor).  "
+            "Minimum relevance score for file-corpus hits (range 0.0–1.0).  "
+            "Hits from the file corpus with a score strictly below this value "
+            "are excluded.  Defaults to 0.05 (matches typical BM25 noise floor).  "
             "Set to 0.0 to disable filtering for this corpus."
         ),
     )
