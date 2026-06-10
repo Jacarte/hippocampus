@@ -12,6 +12,11 @@ from .tracing import (
     trace_backend_error,
     trace_retrieval_diagnostics,
 )
+from .metrics import (
+    retrieval_candidates_count,
+    retrieval_degradations_total,
+    retrieval_duration_seconds,
+)
 
 
 class RetrievalService:
@@ -86,6 +91,15 @@ class RetrievalService:
             "retrieval.search",
             diagnostics=diagnostics,
         )
+        retrieval_duration_seconds.labels(stage="lexical").observe(lexical_latency_ms / 1000.0)
+        retrieval_duration_seconds.labels(stage="semantic").observe(semantic_latency_ms / 1000.0)
+        retrieval_duration_seconds.labels(stage="total").observe(total_elapsed_ms() / 1000.0)
+        retrieval_candidates_count.labels(stage="lexical").observe(lexical_count)
+        retrieval_candidates_count.labels(stage="semantic").observe(semantic_count)
+        if lexical_degraded:
+            retrieval_degradations_total.labels(stage="lexical", reason="unavailable").inc()
+        if semantic_degraded:
+            retrieval_degradations_total.labels(stage="semantic", reason="unavailable").inc()
         return self._attach_trace(
             semantic_response,
             diagnostics=diagnostics,
@@ -121,6 +135,9 @@ class RetrievalService:
             total_latency_ms=lexical_latency_ms,
         )
         trace_retrieval_diagnostics("retrieval.lexical_search", diagnostics=diagnostics)
+        retrieval_duration_seconds.labels(stage="lexical").observe(lexical_latency_ms / 1000.0)
+        retrieval_duration_seconds.labels(stage="total").observe(lexical_latency_ms / 1000.0)
+        retrieval_candidates_count.labels(stage="lexical").observe(len(results))
         return {
             "query": query,
             "params": self._search_params(
@@ -222,6 +239,23 @@ class RetrievalService:
                     candidates=semantic_results,
                 )
 
+        total_ms = total_elapsed_ms()
+        retrieval_duration_seconds.labels(stage="lexical").observe(lexical_latency_ms / 1000.0)
+        retrieval_duration_seconds.labels(stage="semantic").observe(semantic_latency_ms / 1000.0)
+        if rerank_applied:
+            retrieval_duration_seconds.labels(stage="rerank").observe(rerank_latency_ms / 1000.0)
+        retrieval_duration_seconds.labels(stage="total").observe(total_ms / 1000.0)
+        retrieval_candidates_count.labels(stage="lexical").observe(len(lexical_results))
+        retrieval_candidates_count.labels(stage="semantic").observe(len(semantic_results))
+        if lexical_reason is None and semantic_reason is None:
+            retrieval_candidates_count.labels(stage="rerank").observe(len(fused_candidates))
+        if lexical_reason is not None:
+            retrieval_degradations_total.labels(stage="lexical", reason=lexical_reason).inc()
+        if semantic_reason is not None:
+            retrieval_degradations_total.labels(stage="semantic", reason=semantic_reason).inc()
+        if rerank_reason is not None:
+            retrieval_degradations_total.labels(stage="rerank", reason=rerank_reason).inc()
+
         reasons = [
             reason
             for reason in (lexical_reason, semantic_reason, rerank_reason)
@@ -257,7 +291,7 @@ class RetrievalService:
                 "lexical": lexical_latency_ms,
                 "semantic": semantic_latency_ms,
                 "rerank": rerank_latency_ms,
-                "total": total_elapsed_ms(),
+                "total": total_ms,
             },
         }
         trace_retrieval_diagnostics(

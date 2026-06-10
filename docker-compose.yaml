@@ -90,6 +90,40 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: mem0-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - mem0-network
+    restart: unless-stopped
+    depends_on:
+      mem0-server:
+        condition: service_healthy
+    labels:
+      com.example.description: "Prometheus metrics scraper for mem0-server"
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: mem0-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - mem0-network
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    labels:
+      com.example.description: "Grafana dashboards for mem0-server telemetry"
+
 volumes:
   postgres_data:
     driver: local

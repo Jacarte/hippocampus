@@ -8,12 +8,14 @@ reports truthful provenance and degradation.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 from api_models import FileHit, MemoryHit, UnifiedQueryResponse
 from .file_corpus_service import FileCorpusService
+from .metrics import query_duration_seconds, query_hits_count
 
 
 class QueryService:
@@ -105,33 +107,39 @@ class QueryService:
 
         if "file_corpus" in expanded:
             corpora_queried.append("file_corpus")
+            _t0 = time.monotonic()
             try:
-                all_hits.extend(
-                    self._query_file_corpus(
-                        query_text,
-                        path_filter=path_filter,
-                        language_filter=language_filter,
-                        limit=limit,
-                        chunk_memory_enabled=chunk_memory_enabled,
-                        query_embedding=query_embedding,
-                    )
+                file_hits = self._query_file_corpus(
+                    query_text,
+                    path_filter=path_filter,
+                    language_filter=language_filter,
+                    limit=limit,
+                    chunk_memory_enabled=chunk_memory_enabled,
+                    query_embedding=query_embedding,
                 )
+                query_duration_seconds.labels(corpus="file_corpus").observe(time.monotonic() - _t0)
+                query_hits_count.labels(corpus="file_corpus").observe(len(file_hits))
+                all_hits.extend(file_hits)
             except Exception as exc:  # noqa: BLE001
+                query_duration_seconds.labels(corpus="file_corpus").observe(time.monotonic() - _t0)
                 degraded = True
                 degradation_reasons.append(f"file_corpus: {exc}")
 
         if "memory_store" in expanded:
             corpora_queried.append("memory_store")
+            _t0 = time.monotonic()
             try:
-                all_hits.extend(
-                    self._query_memory_store(
-                        query_text,
-                        limit=limit,
-                        user_id=user_id,
-                        memory_instance=memory_instance,
-                    )
+                memory_hits = self._query_memory_store(
+                    query_text,
+                    limit=limit,
+                    user_id=user_id,
+                    memory_instance=memory_instance,
                 )
+                query_duration_seconds.labels(corpus="memory_store").observe(time.monotonic() - _t0)
+                query_hits_count.labels(corpus="memory_store").observe(len(memory_hits))
+                all_hits.extend(memory_hits)
             except Exception as exc:  # noqa: BLE001
+                query_duration_seconds.labels(corpus="memory_store").observe(time.monotonic() - _t0)
                 degraded = True
                 degradation_reasons.append(f"memory_store: {exc}")
 
