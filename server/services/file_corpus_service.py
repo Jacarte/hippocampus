@@ -6,6 +6,8 @@ import re
 import uuid
 from typing import Any
 
+from .metrics import file_corpus_operations_total
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,7 +35,8 @@ class FileCorpusService:
           omitted.  Neither field is required; existing callers that do not
           supply them continue to work unchanged.
         """
-        self.delete_file(root, file_path)
+        file_corpus_operations_total.labels(operation="upsert").inc()
+        self._remove_file_chunks(root, file_path)
         for chunk in chunks:
             chunk_id = str(chunk.get("id") or uuid.uuid4())
             record: dict[str, Any] = {
@@ -55,6 +58,18 @@ class FileCorpusService:
             self._chunks[storage_key] = record
 
     def delete_file(self, root: str, file_path: str) -> None:
+        file_corpus_operations_total.labels(operation="delete").inc()
+        self._remove_file_chunks(root, file_path)
+
+    def _remove_file_chunks(self, root: str, file_path: str) -> None:
+        """Remove all stored chunks for *file_path* under *root* without metrics.
+
+        This is the internal chunk-removal primitive used by both
+        :meth:`upsert_chunks` (replace semantics) and :meth:`delete_file`
+        (explicit deletion).  Only :meth:`delete_file` emits a metrics counter
+        so that ``operation="delete"`` is not inflated by upsert-internal
+        replacements.
+        """
         prefix = f"{root}\x00{file_path}\x00"
         keys_to_remove = [k for k in self._chunks if k.startswith(prefix)]
         for key in keys_to_remove:
@@ -79,6 +94,7 @@ class FileCorpusService:
         method logs a warning and returns the lexical-only results so callers
         are never left empty-handed.
         """
+        file_corpus_operations_total.labels(operation="query").inc()
         lexical = self._lexical_query(query_text, filters=filters, limit=limit)
 
         if not chunk_memory_enabled or query_embedding is None:
@@ -246,6 +262,7 @@ class FileCorpusService:
         return chunks
 
     def reset(self) -> dict[str, Any]:
+        file_corpus_operations_total.labels(operation="reset").inc()
         cleared_count = len(self._chunks)
         self._chunks.clear()
         return {"cleared_chunks": cleared_count}

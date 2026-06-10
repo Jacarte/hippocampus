@@ -49,6 +49,8 @@ from services.tracing import (
     trace_backend_request_complete,
     trace_backend_request_start,
 )
+from prometheus_client import make_asgi_app
+from services.metrics import http_request_duration_seconds, http_requests_total
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -99,6 +101,12 @@ def create_app(
             response = await call_next(request)
         except Exception:
             latency_ms = (time.perf_counter() - started_at) * 1000
+            http_requests_total.labels(
+                method=request.method, path=request.url.path, status_code=500
+            ).inc()
+            http_request_duration_seconds.labels(
+                method=request.method, path=request.url.path
+            ).observe(latency_ms / 1000)
             trace_backend_request_complete(
                 request.method,
                 request.url.path,
@@ -108,15 +116,42 @@ def create_app(
             raise
         else:
             response.headers["X-Correlation-ID"] = request_id
+            latency_ms = (time.perf_counter() - started_at) * 1000
+            http_requests_total.labels(
+                method=request.method, path=request.url.path, status_code=response.status_code
+            ).inc()
+            http_request_duration_seconds.labels(
+                method=request.method, path=request.url.path
+            ).observe(latency_ms / 1000)
             trace_backend_request_complete(
                 request.method,
                 request.url.path,
                 status_code=response.status_code,
-                latency_ms=(time.perf_counter() - started_at) * 1000,
+                latency_ms=latency_ms,
             )
             return response
         finally:
             reset_request_id(token)
+
+    class _PrometheusASGI:
+        """Wraps the Prometheus ASGI app so Starlette routes it correctly.
+
+        ``make_asgi_app()`` returns a closure (function), which ``Route`` treats
+        as a regular request handler ``func(request) -> response`` and calls
+        with the wrong signature.  Wrapping it in a class makes ``Route``
+        detect it as an ASGI callable and invoke it with ``(scope, receive,
+        send)`` instead — no trailing-slash redirect, no signature mismatch.
+        """
+
+        def __init__(self) -> None:
+            self._app = make_asgi_app()
+
+        async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+            await self._app(scope, receive, send)
+
+    app.add_route(
+        "/metrics", _PrometheusASGI(), methods=["GET"], include_in_schema=False
+    )
 
     if startup_enabled:
 

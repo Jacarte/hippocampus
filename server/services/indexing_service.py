@@ -10,6 +10,7 @@ from .file_corpus_service import FileCorpusService
 from .file_scanner import FileScanner, _EXT_TO_LANG
 from .index_manifest_service import IndexManifestService
 from .chunkers import CodeChunker, MarkdownChunker
+from .metrics import indexing_chunks_total, indexing_files_total
 from .summary_service import SummaryService
 
 logger = logging.getLogger(__name__)
@@ -187,6 +188,10 @@ class IndexingService:
             except Exception as exc:
                 errors.append(f"{file_path}: {exc}")
 
+        if files_indexed > 0:
+            indexing_files_total.labels(operation="sync").inc(files_indexed)
+            indexing_chunks_total.labels(operation="sync").inc(chunks_indexed)
+
         return {
             "root": root,
             "files_indexed": files_indexed,
@@ -283,6 +288,10 @@ class IndexingService:
                 chunks_indexed += len(chunks)
             except Exception as exc:
                 errors.append(f"{file_path}: {exc}")
+
+        if files_indexed > 0:
+            indexing_files_total.labels(operation="ingest").inc(files_indexed)
+            indexing_chunks_total.labels(operation="ingest").inc(chunks_indexed)
 
         return {
             "root": root,

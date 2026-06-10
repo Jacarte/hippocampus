@@ -7,6 +7,14 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+import time
+
+from .metrics import (
+    background_job_duration_seconds,
+    background_jobs_total,
+    background_job_queue_depth,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -66,6 +74,8 @@ class BackgroundJobService:
                 "result": None,
                 "errors": [],
             }
+            self._refresh_queue_depth()
+        background_jobs_total.labels(status="queued").inc()
         self._executor.submit(self._run, job_id, fn, args, kwargs)
         return job_id
 
@@ -79,6 +89,11 @@ class BackgroundJobService:
         with self._lock:
             self._jobs[job_id]["status"] = "running"
             self._jobs[job_id]["started_at"] = _now_iso()
+            self._refresh_queue_depth()
+
+        job_type = getattr(fn, "__name__", str(fn))
+        start = time.monotonic()
+
         try:
             result = fn(*args, **kwargs)
             errors = result.get("errors", []) if isinstance(result, dict) else []
@@ -87,12 +102,17 @@ class BackgroundJobService:
                 self._jobs[job_id]["result"] = result
                 self._jobs[job_id]["errors"] = errors
                 self._jobs[job_id]["completed_at"] = _now_iso()
+            background_jobs_total.labels(status="completed").inc()
         except Exception as exc:
             logger.error("Background job %s failed: %s", job_id, exc, exc_info=True)
             with self._lock:
                 self._jobs[job_id]["status"] = "failed"
                 self._jobs[job_id]["errors"] = [str(exc)]
                 self._jobs[job_id]["completed_at"] = _now_iso()
+            background_jobs_total.labels(status="failed").inc()
+
+        elapsed = time.monotonic() - start
+        background_job_duration_seconds.labels(job_type=job_type).observe(elapsed)
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         """Return a snapshot of the job record, or ``None`` if not found.
@@ -147,6 +167,14 @@ class BackgroundJobService:
             ]
         errored.sort(key=lambda j: j.get("completed_at") or "", reverse=True)
         return [dict(j) for j in errored[:limit]]
+
+    def _refresh_queue_depth(self) -> None:
+        """Recalculate the queue depth gauge from current queued jobs.
+
+        Caller must hold ``self._lock``.
+        """
+        queued = sum(1 for j in self._jobs.values() if j["status"] == "queued")
+        background_job_queue_depth.set(queued)
 
     def shutdown(self, wait: bool = False) -> None:
         """Shut down the internal thread pool.
