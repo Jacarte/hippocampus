@@ -8,5 +8,7 @@ mem/
 __pycache__/
 .omo/
 
+node_modules/
+
 # Rust CLI build artifacts
 /cli/target/
