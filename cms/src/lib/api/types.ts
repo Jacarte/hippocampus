@@ -19,10 +19,11 @@ export type PaginationInput = {
   pageSize?: number
 }
 
-export type AdminMemoryFilters = ScopeSelection &
-  PaginationInput & {
-    query?: string
-  }
+export type AdminMemoryFilters = PaginationInput & {
+  scope?: ScopeKind
+  scopeId?: string
+  query?: string
+}
 
 export type PopularitySummary = {
   total_visits: number
@@ -64,7 +65,9 @@ export type AdminMemoryListResponse = {
   total_pages: number
 }
 
-export type CreateAdminMemoryRequest = ScopeSelection & {
+export type CreateAdminMemoryRequest = {
+  scope: ScopeKind
+  scope_id: string
   messages: MemoryMessage[]
   metadata?: Record<string, unknown>
 }
@@ -106,6 +109,13 @@ export type VisitMemoryResponse = {
   total_visits: number
   last_visited_at: string | null
   reason: MemoryVisitReason
+}
+
+export type AdminScopesResponse = {
+  users: string[]
+  agents: string[]
+  runs: string[]
+  projects: string[]
 }
 
 export type AdminHealthResponse = Record<string, unknown>

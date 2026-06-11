@@ -5,6 +5,7 @@ import type {
   AdminMemoryDetail,
   AdminMemoryFilters,
   AdminMemoryListResponse,
+  AdminScopesResponse,
   CopyAdminMemoryRequest,
   CopyAdminMemoryResponse,
   CreateAdminMemoryRequest,
@@ -30,6 +31,9 @@ function buildQueryString(params: Record<string, string | number | undefined>): 
 export const adminApi = {
   getHealth(): Promise<AdminHealthResponse> {
     return apiClient.get('/admin/health')
+  },
+  listScopes(): Promise<AdminScopesResponse> {
+    return apiClient.get('/admin/scopes')
   },
   listMemories(filters: AdminMemoryFilters): Promise<AdminMemoryListResponse> {
     const query = buildQueryString({

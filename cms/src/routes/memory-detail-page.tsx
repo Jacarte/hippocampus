@@ -1,15 +1,140 @@
-import type { CSSProperties } from 'react'
+import { useState, useEffect, type CSSProperties } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { CopyActionShell } from '../components/copy-action-shell.tsx'
 import { Panel } from '../components/panel.tsx'
-import { computeDecayDisplay } from '../lib/decay.ts'
-import { findReferenceMemory, getHeatColor } from '../lib/mock-data.ts'
+import { computeDecayDisplay, deriveHalfLifeDays } from '../lib/decay.ts'
+import { getHeatColor } from '../lib/mock-data.ts'
+import { adminApi } from '../lib/api/admin.ts'
+import type { AdminMemoryDetail, ScopeKind } from '../lib/api/types.ts'
+
+function scopeToPrefix(scope: ScopeKind): string {
+  switch (scope) {
+    case 'user':
+      return 'u'
+    case 'agent':
+      return 'a'
+    case 'run':
+      return 'r'
+  }
+}
 
 export function MemoryDetailPage() {
   const { memoryId } = useParams()
-  const memory = findReferenceMemory(memoryId)
-  const decay = computeDecayDisplay(memory)
-  const accentStyle = { '--memory-accent': getHeatColor(memory.heat) } as CSSProperties
+  const [memory, setMemory] = useState<AdminMemoryDetail | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [editContent, setEditContent] = useState('')
+  const [editType, setEditType] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveSuccess, setSaveSuccess] = useState(false)
+
+  useEffect(() => {
+    if (!memoryId) return
+
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+
+    adminApi
+      .getMemoryDetail(memoryId)
+      .then((result) => {
+        if (!cancelled) {
+          setMemory(result)
+          setLoading(false)
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load memory')
+          setLoading(false)
+        }
+      })
+
+    adminApi.recordVisit(memoryId, { reason: 'detail_open' }).catch(() => {
+      // silent — visit recording is best-effort
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [memoryId])
+
+  const startEditing = () => {
+    if (!memory) return
+    setEditContent(memory.content)
+    setEditType(typeof memory.metadata?.type === 'string' ? memory.metadata.type : '')
+    setEditing(true)
+    setSaveError(null)
+    setSaveSuccess(false)
+  }
+
+  const cancelEditing = () => {
+    setEditing(false)
+    setEditContent('')
+    setSaveError(null)
+  }
+
+  const handleSave = async () => {
+    if (!memoryId || !memory) return
+    setSaving(true)
+    setSaveError(null)
+    setSaveSuccess(false)
+
+    try {
+      const updatedMetadata = {
+        ...memory.metadata,
+        type: editType,
+        decay_half_life_days: deriveHalfLifeDays(editType),
+      }
+      const updated = await adminApi.updateMemory(memoryId, {
+        messages: [{ role: 'user', content: editContent }],
+        metadata: updatedMetadata,
+      })
+      setMemory(updated)
+      setEditing(false)
+      setEditContent('')
+      setSaveSuccess(true)
+      setTimeout(() => setSaveSuccess(false), 3000)
+
+      adminApi.recordVisit(memoryId, { reason: 'edit_save' }).catch(() => {
+        // silent — visit recording is best-effort
+      })
+    } catch (err: unknown) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save memory')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="detail-layout">
+        <p className="memory-status-text">Loading…</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="detail-layout">
+        <p className="memory-status-text is-error">{error}</p>
+      </div>
+    )
+  }
+
+  if (!memory) {
+    return (
+      <div className="detail-layout">
+        <p className="memory-status-text">Memory not found</p>
+      </div>
+    )
+  }
+
+  const heat = memory.popularity?.total_visits ?? 0
+  const decay = computeDecayDisplay(memory.freshness)
+  const accentStyle = { '--memory-accent': getHeatColor(heat) } as CSSProperties
 
   return (
     <div className="detail-layout">
@@ -17,7 +142,7 @@ export function MemoryDetailPage() {
         <div className="hero-header">
           <div className="section-stack">
             <p className="eyebrow">memory detail</p>
-            <h1 className="hero-title">{memory.summary}</h1>
+            <h1 className="hero-title">{memory.content}</h1>
             <p className="hero-copy">
               This route keeps the detail, copy, audit, and raw decay inputs split into stable
               cards so later API wiring does not need to rework the mock-aligned layout.
@@ -25,7 +150,7 @@ export function MemoryDetailPage() {
           </div>
 
           <div className="summary-row">
-            <span className="count-badge">heat {memory.heat}</span>
+            <span className="count-badge">heat {heat}</span>
             <Link className="button-ghost" to="/memories">
               Back to memories
             </Link>
@@ -33,11 +158,9 @@ export function MemoryDetailPage() {
         </div>
 
         <div className="scope-tag-row" aria-label="Memory scope tags">
-          {memory.scopeTags.map((tag) => (
-            <span key={`${memory.id}-${tag.prefix}-${tag.value}`} className="scope-tag">
-              {tag.prefix}:{tag.value}
-            </span>
-          ))}
+          <span className="scope-tag">
+            {scopeToPrefix(memory.scope)}:{memory.scope_id}
+          </span>
         </div>
       </section>
 
@@ -51,7 +174,55 @@ export function MemoryDetailPage() {
             <div className="detail-grid">
               <article className="detail-card">
                 <p className="micro-label">Content</p>
-                <h2 className="detail-title">{memory.summary}</h2>
+                {editing ? (
+                  <>
+                    <textarea
+                      className="control-textarea"
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      disabled={saving}
+                      rows={4}
+                    />
+                    <label className="field-stack" style={{ marginTop: 'var(--space-3)' }}>
+                      <span className="field-label">Type</span>
+                      <select
+                        className="control-select"
+                        value={editType}
+                        onChange={(e) => setEditType(e.target.value)}
+                        disabled={saving}
+                      >
+                        <option value="">— select type —</option>
+                        <option value="decision">decision</option>
+                        <option value="stable-fact">stable-fact</option>
+                        <option value="procedure">procedure</option>
+                        <option value="problem-fix">problem-fix</option>
+                      </select>
+                    </label>
+                    {saveError && <p className="memory-status-text is-error">{saveError}</p>}
+                    <div style={{ display: 'inline-flex', gap: 'var(--space-3)', marginTop: 'var(--space-3)' }}>
+                      <button className="button" onClick={handleSave} disabled={saving}>
+                        {saving ? 'Saving\u2026' : 'Save'}
+                      </button>
+                      <button className="button-ghost" onClick={cancelEditing} disabled={saving}>
+                        Cancel
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <h2 className="detail-title">{memory.content}</h2>
+                    <div style={{ marginTop: 'var(--space-3)' }}>
+                      <button className="button-ghost" onClick={startEditing}>
+                        Edit
+                      </button>
+                    </div>
+                  </>
+                )}
+                {saveSuccess && (
+                  <p style={{ margin: 'var(--space-2) 0 0', color: 'var(--color-accent)', fontSize: '0.85rem' }}>
+                    Saved successfully
+                  </p>
+                )}
                 <p className="detail-copy">
                   The future detail editor can mount here without changing the card shell, since the
                   locked admin contract already separates content, metadata, and audit blocks.
@@ -62,11 +233,15 @@ export function MemoryDetailPage() {
                 <p className="micro-label">Audit</p>
                 <div className="timeline">
                   <div className="timeline-item">
-                    <p className="timeline-title">impersonated_by=admin</p>
+                    <p className="timeline-title">
+                      impersonated_by={memory.audit?.impersonated_by ?? '—'}
+                    </p>
                     <p className="timeline-copy">Reserved for all CMS write flows.</p>
                   </div>
                   <div className="timeline-item">
-                    <p className="timeline-title">copied_from=null</p>
+                    <p className="timeline-title">
+                      copied_from={memory.audit?.copied_from ? JSON.stringify(memory.audit.copied_from) : 'null'}
+                    </p>
                     <p className="timeline-copy">Copy provenance will render here later.</p>
                   </div>
                 </div>
@@ -74,7 +249,11 @@ export function MemoryDetailPage() {
             </div>
           </Panel>
 
-          <CopyActionShell sourceLabel={memory.id} />
+          <CopyActionShell
+            sourceMemoryId={memory.memory_id}
+            sourceLabel={memory.memory_id}
+            onCopy={() => {}}
+          />
         </div>
 
         <div className="detail-stack">
@@ -89,19 +268,19 @@ export function MemoryDetailPage() {
                 <dl className="detail-key-value">
                   <div>
                     <dt>created_at</dt>
-                    <dd>{memory.createdAt}</dd>
+                    <dd>{memory.freshness?.created_at ?? '—'}</dd>
                   </div>
                   <div>
                     <dt>decay_half_life_days</dt>
-                    <dd>{memory.decayHalfLifeDays ?? '— (derived from type)'}</dd>
+                    <dd>{memory.freshness?.decay_half_life_days ?? '— (derived from type)'}</dd>
                   </div>
                   <div>
                     <dt>last_visited_at</dt>
-                    <dd>{memory.lastVisitedAt ?? '—'}</dd>
+                    <dd>{memory.freshness?.last_visited_at ?? '—'}</dd>
                   </div>
                   <div>
                     <dt>ttl_expires_at</dt>
-                    <dd>{memory.ttlExpiresAt ?? '—'}</dd>
+                    <dd>{memory.freshness?.ttl_expires_at ?? '—'}</dd>
                   </div>
                 </dl>
               </article>

@@ -13,3 +13,4 @@ dist/
 
 # Rust CLI build artifacts
 /cli/target/
+.playwright-mcp/

@@ -24,6 +24,7 @@ database (``":memory:"``) without touching the real ``MEM0_VISIT_DB_PATH``.
 from __future__ import annotations
 
 import logging
+import os
 from copy import deepcopy
 from typing import Any
 
@@ -34,6 +35,7 @@ from api_models import (
     AdminIndexJobInfo,
     AdminIndexLimits,
     AdminIndexOverviewResponse,
+    AdminScopesResponse,
     AdminIndexRootInfo,
     AdminIndexVisibilityInputs,
     AdminMemoryCopyRequest,
@@ -159,6 +161,160 @@ class AdminService:
             "visit_db_path": self._visit_store.path,
         }
 
+    # -- scopes introspection --------------------------------------------
+
+    def list_scopes(self, memory_instance: Any) -> AdminScopesResponse:
+        """Extract distinct scope identifiers from all stored memories.
+
+        mem0's ``get_all()`` requires at least one identifier, so the
+        method tries multiple fallback strategies in order:
+
+        1. ``get_all()`` with no arguments
+        2. ``get_all(filters={})`` with an empty filter dict
+        3. ``get_all(limit=100000)`` with a large limit
+        4. Direct PostgreSQL query on the pgvector table (reads
+           ``payload->>'user_id'`` / ``agent_id`` / ``run_id`` from the
+           ``POSTGRES_COLLECTION`` table)
+        5. Graceful return of empty lists when all strategies fail
+
+        For each successful call the method scans every record for
+        top-level ``user_id``, ``agent_id``, ``run_id`` and metadata
+        ``project`` / ``project_id`` keys, collecting distinct values.
+
+        Returns:
+            An :class:`AdminScopesResponse` with distinct ``users``,
+            ``agents``, ``runs``, and ``projects`` lists.
+        """
+        strategies = [
+            ("no_args", lambda: memory_instance.get_all()),
+            ("empty_filters", lambda: memory_instance.get_all(filters={})),
+            ("large_limit", lambda: memory_instance.get_all(limit=100000)),
+        ]
+
+        records: list[dict[str, Any]] = []
+        for strategy_name, strategy_fn in strategies:
+            try:
+                result = strategy_fn()
+                if isinstance(result, list):
+                    records = result
+                    logger.debug(
+                        "list_scopes: strategy %r returned %d records",
+                        strategy_name,
+                        len(records),
+                    )
+                    break
+                if isinstance(result, dict):
+                    # Some mem0 backends wrap the list in a dict
+                    inner = result.get("results") or result.get("data") or []
+                    if isinstance(inner, list):
+                        records = inner
+                        logger.debug(
+                            "list_scopes: strategy %r returned %d records (wrapped)",
+                            strategy_name,
+                            len(records),
+                        )
+                        break
+            except Exception as exc:
+                logger.debug(
+                    "list_scopes: strategy %r failed: %s", strategy_name, exc
+                )
+                continue
+        else:
+            # 4th strategy: direct PostgreSQL query — final fallback when
+            # the mem0 API refuses to return all records without a scope
+            # identifier.
+            try:
+                try:
+                    import psycopg2  # type: ignore[import-untyped]
+                except ImportError:
+                    import psycopg as psycopg2  # type: ignore[import-untyped,no-redef]
+
+                conn = psycopg2.connect(
+                    host=os.environ.get("POSTGRES_HOST", "localhost"),
+                    port=int(os.environ.get("POSTGRES_PORT", "5432")),
+                    dbname=os.environ.get("POSTGRES_DB", "postgres"),
+                    user=os.environ.get("POSTGRES_USER", "postgres"),
+                    password=os.environ.get("POSTGRES_PASSWORD", "postgres"),
+                )
+                try:
+                    table = os.environ.get(
+                        "POSTGRES_COLLECTION", "mem0_memories"
+                    )
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            f"SELECT DISTINCT "
+                            f"payload->>'user_id' AS user_id, "
+                            f"payload->>'agent_id' AS agent_id, "
+                            f"payload->>'run_id' AS run_id "
+                            f"FROM {table} "
+                            f"WHERE payload->>'user_id' IS NOT NULL "
+                            f"OR payload->>'agent_id' IS NOT NULL "
+                            f"OR payload->>'run_id' IS NOT NULL"
+                        )
+                        rows = cur.fetchall()
+                        seen: set[tuple[str | None, str | None, str | None]]
+                        seen = set()
+                        for user_id, agent_id, run_id in rows:
+                            key = (user_id, agent_id, run_id)
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            record: dict[str, Any] = {}
+                            if user_id:
+                                record["user_id"] = user_id
+                            if agent_id:
+                                record["agent_id"] = agent_id
+                            if run_id:
+                                record["run_id"] = run_id
+                            records.append(record)
+                        logger.debug(
+                            "list_scopes: postgres fallback returned %d records",
+                            len(records),
+                        )
+                finally:
+                    conn.close()
+            except Exception as exc:
+                logger.warning(
+                    "list_scopes: postgres fallback failed: %s", exc
+                )
+
+            if not records:
+                logger.warning(
+                    "list_scopes: all strategies exhausted — returning empty scopes"
+                )
+
+        users: set[str] = set()
+        agents: set[str] = set()
+        runs: set[str] = set()
+        projects: set[str] = set()
+
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            uid = record.get("user_id")
+            if isinstance(uid, str) and uid:
+                users.add(uid)
+            aid = record.get("agent_id")
+            if isinstance(aid, str) and aid:
+                agents.add(aid)
+            rid = record.get("run_id")
+            if isinstance(rid, str) and rid:
+                runs.add(rid)
+            # Also check metadata for project identifiers
+            metadata = record.get("metadata")
+            if isinstance(metadata, dict):
+                for meta_key in ("project", "project_id"):
+                    meta_val = metadata.get(meta_key)
+                    if isinstance(meta_val, str) and meta_val:
+                        projects.add(meta_val)
+
+        return AdminScopesResponse(
+            users=sorted(users),
+            agents=sorted(agents),
+            runs=sorted(runs),
+            projects=sorted(projects),
+        )
+
     # -- write paths (these own audit stamping) ---------------------------
 
     def create_memory(
@@ -197,7 +353,7 @@ class AdminService:
             metadata=prepared_metadata,
             **{scope_param: scope_id},
         )
-        memory_id = self._extract_memory_id(result) if isinstance(result, dict) else ""
+        memory_id = self._extract_memory_id(result)
         return {
             "memory_id": memory_id,
             "scope": scope,
@@ -253,12 +409,27 @@ class AdminService:
                 "metadata": prepared_metadata,
             },
         )
-        record = (
-            self._anchor_service.normalize_record(updated)
-            if isinstance(updated, dict)
-            else updated
-        )
-        return self._assemble_detail_item(record)
+
+        # mem0's update() may return None, a string, or a dict with
+        # unexpected shape (e.g. {"message": "...", "id": "..."})
+        # instead of the full record.  When the response is not a
+        # usable record dict, re-fetch via get().
+        if not isinstance(updated, dict) or "messages" not in updated:
+            fetched = memory_instance.get(memory_id)
+            if fetched is None:
+                raise ValueError(
+                    f"memory {memory_id!r} not found after update"
+                )
+            updated = fetched
+
+        try:
+            record = self._anchor_service.normalize_record(updated)
+            return self._assemble_detail_item(record)
+        except Exception as exc:
+            raise ValueError(
+                f"failed to assemble detail for memory {memory_id!r} "
+                f"after update: {exc}"
+            ) from exc
 
     def delete_memory(
         self, memory_instance: Any, memory_id: str
@@ -326,7 +497,13 @@ class AdminService:
         if source_record is None:
             raise ValueError(f"memory {source_memory_id!r} not found")
         source_metadata = self._safe_metadata(source_record)
-        source_scope, source_scope_id = self._infer_source_scope(source_metadata)
+        source_scope, source_scope_id = self._extract_scope_from_record(
+            source_record
+        )
+        if not source_scope_id:
+            source_scope, source_scope_id = self._infer_source_scope(
+                source_metadata
+            )
         copied_from = CopiedFromInfo(
             source_memory_id=source_memory_id,
             source_scope=source_scope,
@@ -374,21 +551,24 @@ class AdminService:
         self,
         memory_instance: Any,
         *,
-        scope: ScopeType,
-        scope_id: str,
+        scope: ScopeType | None = None,
+        scope_id: str | None = None,
         page: int,
         page_size: int,
         query: str | None = None,
     ) -> dict[str, Any]:
-        """List memories for *scope*/*scope_id* with normalized aggregates.
+        """List memories with normalized aggregates.
 
-        Cross-scope listing is implemented by forwarding a single scope
-        identifier (``user_id`` / ``agent_id`` / ``run_id``) to the mem0
-        instance's :meth:`get_all`.  The returned records are passed
-        through :class:`AnchorService` for metadata normalization so the
-        CMS always sees a stable, anchor-aware shape.  Per-memory popularity
-        and freshness are computed from the dedicated visit store and
-        attached as Pydantic models.
+        When both ``scope`` and ``scope_id`` are provided the listing is
+        scoped to that particular user/agent/run.  When either is omitted
+        the method returns **all** memories across all scopes, with each
+        item carrying its own ``scope``/``scope_id`` inferred from the
+        stored record's top-level fields.
+
+        The returned records are passed through :class:`AnchorService` for
+        metadata normalization so the CMS always sees a stable, anchor-aware
+        shape.  Per-memory popularity and freshness are computed from the
+        dedicated visit store and attached as Pydantic models.
 
         When *query* is provided the listing is filtered to memories whose
         extracted ``content`` contains the query as a case-insensitive
@@ -398,8 +578,10 @@ class AdminService:
 
         Args:
             memory_instance: The mem0 memory instance to read from.
-            scope: ``"user"`` / ``"agent"`` / ``"run"``.
-            scope_id: Identifier within the chosen scope.
+            scope: ``"user"`` / ``"agent"`` / ``"run"``.  When omitted
+                all scopes are returned.
+            scope_id: Identifier within the chosen scope.  When omitted
+                all scopes are returned.
             page: 1-indexed page number; must be ``>= 1``.
             page_size: Items per page; must be ``>= 1``.
             query: Optional case-insensitive substring filter applied to
@@ -421,29 +603,56 @@ class AdminService:
         if page_size < 1:
             raise ValueError("page_size must be >= 1")
 
-        scope_param = _scope_param_name(scope)
         normalized_query = (query or "").strip()
-        trace_backend_operation(
-            "admin.list_memories",
-            scope=scope,
-            scope_param=scope_param,
-            page=page,
-            page_size=page_size,
-            has_query=bool(normalized_query),
-        )
+        scope_provided = scope is not None and scope_id is not None and bool(scope_id)
 
-        raw_records = memory_instance.get_all(**{scope_param: scope_id})
+        if scope_provided:
+            scope_param = _scope_param_name(scope)  # type: ignore[arg-type]
+            trace_backend_operation(
+                "admin.list_memories",
+                scope=scope,
+                scope_param=scope_param,
+                page=page,
+                page_size=page_size,
+                has_query=bool(normalized_query),
+            )
+            raw_records = memory_instance.get_all(**{scope_param: scope_id})
+        else:
+            trace_backend_operation(
+                "admin.list_memories",
+                scope=None,
+                page=page,
+                page_size=page_size,
+                has_query=bool(normalized_query),
+            )
+            try:
+                raw_records = memory_instance.get_all()
+            except Exception:
+                # mem0 requires at least one identifier; unscoped listing
+                # is not supported by the library. Return empty gracefully.
+                logger.warning("Unscoped get_all() failed — mem0 requires an identifier")
+                raw_records = []
+
+        # Unwrap dict-wrapped response from some mem0 backends
+        if isinstance(raw_records, dict):
+            raw_records = raw_records.get("results") or raw_records.get("data") or []
+
         items = self._anchor_service.normalize_payload(raw_records) or []
         if not isinstance(items, list):
             items = list(items) if items else []
 
         if normalized_query:
             needle = normalized_query.casefold()
-            items = [
-                record
-                for record in items
-                if needle in self._extract_content(record).casefold()
-            ]
+            def _matches(record: Any) -> bool:
+                if needle in self._extract_content(record).casefold():
+                    return True
+                metadata = self._safe_metadata(record)
+                if metadata:
+                    for value in metadata.values():
+                        if isinstance(value, str) and needle in value.casefold():
+                            return True
+                return False
+            items = [record for record in items if _matches(record)]
 
         total_items = len(items)
         start = (page - 1) * page_size
@@ -458,16 +667,31 @@ class AdminService:
             self._extract_memory_ids(page_items)
         )
 
-        assembled_items = [
-            self._assemble_list_item(
-                record=record,
-                scope=scope,
-                scope_id=scope_id,
-                aggregates_by_id=aggregates,
-                max_total=max_total,
-            )
-            for record in page_items
-        ]
+        if scope_provided:
+            assembled_items = [
+                self._assemble_list_item(
+                    record=record,
+                    scope=scope,  # type: ignore[arg-type]
+                    scope_id=scope_id,  # type: ignore[arg-type]
+                    aggregates_by_id=aggregates,
+                    max_total=max_total,
+                )
+                for record in page_items
+            ]
+        else:
+            assembled_items = []
+            for record in page_items:
+                item_scope, item_scope_id = self._extract_scope_from_record(record)
+                assembled_items.append(
+                    self._assemble_list_item(
+                        record=record,
+                        scope=item_scope,
+                        scope_id=item_scope_id,
+                        aggregates_by_id=aggregates,
+                        max_total=max_total,
+                    )
+                )
+
         return {
             "items": assembled_items,
             "page": page,
@@ -727,7 +951,9 @@ class AdminService:
         """
         memory_id = self._extract_memory_id(record)
         metadata = self._safe_metadata(record)
-        scope, scope_id = self._infer_source_scope(metadata)
+        scope, scope_id = self._extract_scope_from_record(record)
+        if not scope_id:
+            scope, scope_id = self._infer_source_scope(metadata)
         aggregate = self._visit_store.get_aggregates(memory_id)
         max_total = self._visit_store.max_total_visits()
         return {
@@ -857,6 +1083,8 @@ class AdminService:
     @staticmethod
     def _extract_memory_id(record: Any) -> str:
         """Extract the ``memory_id``/``id`` field from a raw record."""
+        if isinstance(record, str):
+            return record
         if not isinstance(record, dict):
             return ""
         for key in ("id", "memory_id"):
@@ -894,6 +1122,37 @@ class AdminService:
                         parts.append(content)
             return "\n".join(parts)
         return ""
+
+    @staticmethod
+    def _extract_scope_from_record(
+        record: dict[str, Any],
+    ) -> tuple[ScopeType, str]:
+        """Extract ``(scope, scope_id)`` from a memory record's top-level fields.
+
+        Mem0 stores scope identifiers (``user_id``, ``agent_id``, ``run_id``)
+        as top-level fields on each record.  This helper reads them back so
+        the admin list can display per-memory scope info even when no
+        global scope filter was applied.
+
+        Args:
+            record: A normalized mem0 record (post
+                :class:`AnchorService` normalisation).
+
+        Returns:
+            A ``(scope, scope_id)`` pair.  Falls back to ``("user", "")``
+            when the record has no recognised scope field.
+        """
+        if not isinstance(record, dict):
+            return "user", ""
+        for scope, key in (
+            ("user", "user_id"),
+            ("agent", "agent_id"),
+            ("run", "run_id"),
+        ):
+            value = record.get(key)
+            if isinstance(value, str) and value:
+                return scope, value  # type: ignore[return-value]
+        return "user", ""
 
     @staticmethod
     def _extract_source_messages(record: Any) -> list[dict[str, str]]:

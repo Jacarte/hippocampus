@@ -737,6 +737,32 @@ class AdminIndexVisibilityInputs(BaseModel):
     )
 
 
+class AdminScopesResponse(BaseModel):
+    """Response body for ``GET /admin/scopes``.
+
+    Returns distinct identifiers observed across all stored memories
+    for each scope type.  ``projects`` is populated from memory metadata
+    (``project`` / ``project_id`` keys) when available.
+    """
+
+    users: list[str] = Field(
+        default_factory=list,
+        description="Distinct user identifiers observed in stored memories.",
+    )
+    agents: list[str] = Field(
+        default_factory=list,
+        description="Distinct agent identifiers observed in stored memories.",
+    )
+    runs: list[str] = Field(
+        default_factory=list,
+        description="Distinct run identifiers observed in stored memories.",
+    )
+    projects: list[str] = Field(
+        default_factory=list,
+        description="Distinct project identifiers observed in memory metadata.",
+    )
+
+
 class AdminIndexOverviewResponse(BaseModel):
     """Response body for ``GET /admin/index/overview``.
 

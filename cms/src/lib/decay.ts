@@ -1,4 +1,4 @@
-import type { ReferenceMemoryCard } from './mock-data.ts'
+import type { FreshnessSummary } from './api/types.ts'
 
 /** Map memory type to a default half-life in days. */
 export function deriveHalfLifeDays(type: string): number {
@@ -28,14 +28,6 @@ export function computeRecencyScore(
   return ttlExpired ? decay * 0.25 : decay
 }
 
-/** Parse a "DD/MM/YYYY" mock-date string to epoch ms. */
-export function parseCreatedAt(dateStr: string): number {
-  const parts = dateStr.split('/')
-  if (parts.length !== 3) return Date.now()
-  const [day, month, year] = parts.map(Number)
-  return new Date(year, month - 1, day).getTime()
-}
-
 /** Return values ready for display on the detail page. */
 export type DecayDisplay = {
   halfLifeDays: number
@@ -44,13 +36,19 @@ export type DecayDisplay = {
   neverVisited: boolean
 }
 
-export function computeDecayDisplay(memory: ReferenceMemoryCard, nowMs = Date.now()): DecayDisplay {
-  const halfLifeDays = memory.decayHalfLifeDays ?? deriveHalfLifeDays(memory.type)
-  const createdAtMs = parseCreatedAt(memory.createdAt)
-  const ageDays = Math.max(0, (nowMs - createdAtMs) / 86_400_000)
-  const ttlMs = memory.ttlExpiresAt ? Date.parse(memory.ttlExpiresAt) : undefined
-  const recency = computeRecencyScore(nowMs, createdAtMs, halfLifeDays, ttlMs)
-  const neverVisited = !memory.lastVisitedAt
+export function computeDecayDisplay(
+  freshness: FreshnessSummary | undefined,
+  nowMs = Date.now(),
+): DecayDisplay {
+  if (!freshness) {
+    return { halfLifeDays: 30, ageDays: 0, recency: 0.5, neverVisited: true }
+  }
 
-  return { halfLifeDays, ageDays, recency, neverVisited }
+  const halfLifeDays = freshness.decay_half_life_days ?? deriveHalfLifeDays('stable-fact')
+  const createdAtMs = freshness.created_at ? new Date(freshness.created_at).getTime() : undefined
+  const ageDays = createdAtMs !== undefined ? Math.max(0, (nowMs - createdAtMs) / 86_400_000) : 0
+  const ttlMs = freshness.ttl_expires_at ? new Date(freshness.ttl_expires_at).getTime() : undefined
+  const recency = computeRecencyScore(nowMs, createdAtMs, halfLifeDays, ttlMs)
+
+  return { halfLifeDays, ageDays, recency, neverVisited: freshness.never_visited }
 }

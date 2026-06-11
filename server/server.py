@@ -16,6 +16,7 @@ from api_models import (
     AdminMemoryCreateRequest,
     AdminMemoryUpdateRequest,
     AdminMemoryVisitRequest,
+    AdminScopesResponse,
     CapabilitiesResponse,
     FileChunksRequest,
     IndexResetRequest,
@@ -511,11 +512,35 @@ def create_app(
             lambda: request.app.state.admin_service.health(),
         )
 
+    @app.get(
+        "/admin/scopes",
+        summary="Admin list known scope identifiers",
+        response_model=AdminScopesResponse,
+    )
+    def admin_list_scopes(request: Request) -> AdminScopesResponse:
+        """Return distinct user, agent, run, and project identifiers.
+
+        The endpoint tries multiple strategies to enumerate all stored
+        memories (since mem0's ``get_all()`` requires an identifier) and
+        extracts distinct scope values from the results.
+
+        Returns:
+            An :class:`AdminScopesResponse` with ``users``, ``agents``,
+            ``runs``, and ``projects`` lists (sorted, no duplicates).
+            Lists are empty when no memories are stored or no strategy
+            succeeds.
+        """
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "admin_list_scopes",
+            lambda: request.app.state.admin_service.list_scopes(memory_instance),
+        )
+
     @app.get("/admin/memories", summary="Admin list memories")
     def admin_list_memories(
         request: Request,
-        scope: ScopeType,
-        scope_id: str,
+        scope: ScopeType | None = None,
+        scope_id: str | None = None,
         page: int = Query(default=1, ge=1, description="Page number (1-indexed)."),
         page_size: int = Query(
             default=20,
@@ -532,7 +557,13 @@ def create_app(
             ),
         ),
     ) -> dict[str, Any]:
-        """Return a paginated list of memories scoped to *scope*/*scope_id*.
+        """Return a paginated list of memories, optionally filtered by scope.
+
+        When ``scope`` and ``scope_id`` are both provided the response is
+        scoped to that particular user/agent/run.  When either is omitted
+        the endpoint returns **all** memories across all scopes, with each
+        item carrying its own ``scope``/``scope_id`` inferred from the
+        stored record.
 
         The response mirrors :class:`AdminMemoryListResponse` and
         includes per-memory popularity and freshness raw fields for the
@@ -540,8 +571,10 @@ def create_app(
         :class:`AdminPopularityInfo` / :class:`AdminFreshnessInfo` pair.
 
         Args:
-            scope: ``"user"`` / ``"agent"`` / ``"run"``.
-            scope_id: Identifier within the chosen scope.
+            scope: ``"user"`` / ``"agent"`` / ``"run"``.  When omitted
+                all scopes are returned.
+            scope_id: Identifier within the chosen scope.  When omitted
+                all scopes are returned.
             page: 1-indexed page number.
             page_size: Items per page (clamped to 100).
             query: Optional case-insensitive substring filter on
