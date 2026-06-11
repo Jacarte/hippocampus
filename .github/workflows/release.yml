@@ -100,3 +100,31 @@ jobs:
             artifacts/m0grep-macos-arm64/m0grep-macos-arm64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker-cms:
+    needs: check-release
+    if: needs.check-release.outputs.already-released == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push CMS image
+        uses: docker/build-push-action@v6
+        with:
+          context: cms/
+          file: Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/mem0-cms:${{ needs.check-release.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/mem0-cms:latest
+          build-args: |
+            VERSION=${{ needs.check-release.outputs.version }}
