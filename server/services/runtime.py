@@ -81,6 +81,9 @@ def get_config_from_env() -> dict[str, Any]:
     config["history_db_path"] = os.environ.get(
         "MEM0_HISTORY_DB_PATH", "/var/lib/mem0/history.db"
     )
+    config["visit_db_path"] = os.environ.get(
+        "MEM0_VISIT_DB_PATH", "/var/lib/mem0/visits.db"
+    )
     return config
 
 
@@ -159,6 +162,30 @@ def get_runtime_options() -> dict[str, Any]:
         "port": int(os.environ.get("MEM0_PORT", "8000")),
         "workers": int(os.environ.get("MEM0_WORKERS", "1")),
         "log_level": os.environ.get("MEM0_LOG_LEVEL", "info"),
+    }
+
+
+def get_admin_runtime_options() -> dict[str, Any]:
+    """Return admin-specific runtime option defaults from environment.
+
+    Returns
+    -------
+    dict[str, Any]
+        Keys:
+        - ``visit_db_path`` — path to the SQLite visit telemetry store
+        - ``admin_page_size_default`` — default items per page for admin list
+        - ``admin_page_size_max`` — maximum allowed items per page
+    """
+    return {
+        "visit_db_path": os.environ.get(
+            "MEM0_VISIT_DB_PATH", "/var/lib/mem0/visits.db"
+        ),
+        "admin_page_size_default": int(
+            os.environ.get("MEM0_ADMIN_PAGE_SIZE_DEFAULT", "20")
+        ),
+        "admin_page_size_max": int(
+            os.environ.get("MEM0_ADMIN_PAGE_SIZE_MAX", "100")
+        ),
     }
 
 

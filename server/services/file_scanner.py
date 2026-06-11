@@ -67,6 +67,30 @@ class FileScanner:
         _, ext = os.path.splitext(file_path.lower())
         return ext in _EXT_TO_LANG
 
+    @staticmethod
+    def language_for(file_path: str) -> str | None:
+        """Return the detected language label for *file_path*, or ``None``.
+
+        Thin wrapper around the private ``_EXT_TO_LANG`` map so callers
+        outside :class:`FileScanner` (e.g. :class:`AdminService` when
+        building the index overview) can map a relative file path to
+        its language label without re-implementing the mapping.
+
+        Args:
+            file_path: File name or relative path.  The extension is
+                lower-cased before lookup, matching
+                :meth:`is_supported` and :meth:`scan`.
+
+        Returns:
+            The language string (e.g. ``"python"``, ``"typescript"``,
+            ``"markdown"``) when the extension is recognised; ``None``
+            for unrecognised extensions or files without an extension.
+        """
+        _, ext = os.path.splitext(file_path.lower())
+        if not ext:
+            return None
+        return _EXT_TO_LANG.get(ext)
+
     def scan(self, root: str) -> list[dict[str, Any]]:
         """
         Walk *root* and return {file_path, language, size_bytes, fingerprint} for each supported file.

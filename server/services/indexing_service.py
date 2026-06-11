@@ -76,6 +76,42 @@ class IndexingService:
         """
         self._memory = memory_instance
 
+    def iter_manifest_files(self) -> list[tuple[str, Any]]:
+        """Public accessor over :meth:`IndexManifestService.iter_file_records`.
+
+        Returns a snapshot of every tracked file as
+        ``(file_key, FileRecord)`` pairs so callers outside the service
+        (notably :class:`AdminService` when building the index overview)
+        can iterate per-file state without reaching into the private
+        ``_manifest._files`` dict.  ``file_key`` is the
+        ``"{root}\\x00{file_path}"`` composite used by the manifest.
+
+        Returns:
+            A fresh list of ``(file_key, FileRecord)`` tuples; mutating
+            the result does not change the underlying manifest.
+        """
+        return self._manifest.iter_file_records()
+
+    def file_has_summary_embedding(self, root: str, file_path: str) -> bool:
+        """Return ``True`` when the corpus has a summary embedding for the file.
+
+        Thin pass-through to
+        :meth:`FileCorpusService.has_summary_embedding` so the admin
+        overview can populate :class:`AdminIndexFileInfo`'s
+        ``has_summary_embedding`` flag without depending on the
+        internal ``_corpus`` attribute.  Returns ``False`` for files
+        that have no chunks or no summary embeddings.
+
+        Args:
+            root: Namespace the file is stored under.
+            file_path: Relative file path within *root*.
+
+        Returns:
+            ``True`` if any chunk for the file has a non-empty
+            ``summary_embedding``; ``False`` otherwise.
+        """
+        return self._corpus.has_summary_embedding(root, file_path)
+
     def sync(self, root: str, generate_summaries: bool = False) -> dict[str, Any]:
         """Synchronise *root* into the corpus and manifest.
 

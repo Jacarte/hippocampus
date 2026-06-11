@@ -83,6 +83,20 @@ POST /retrieve
 POST /reset
 ```
 
+Additive admin endpoints (v1 — internal CMS):
+
+```
+GET    /admin/health
+GET    /admin/memories?scope=<user|agent|run>&scope_id=<id>&page=<n>&page_size=<n>&query=<optional>
+POST   /admin/memories
+GET    /admin/memories/{memory_id}
+PUT    /admin/memories/{memory_id}
+DELETE /admin/memories/{memory_id}
+POST   /admin/memories/{memory_id}/copy
+POST   /admin/memories/{memory_id}/visits
+GET    /admin/index/overview
+```
+
 ### Configuration
 
 Configuration is driven by environment variables. Accepted defaults:
@@ -93,6 +107,9 @@ MEM0_PORT=8000
 MEM0_WORKERS=1
 MEM0_LOG_LEVEL=info
 MEM0_HISTORY_DB_PATH=/var/lib/mem0/history.db
+MEM0_VISIT_DB_PATH=/var/lib/mem0/visits.db
+MEM0_ADMIN_PAGE_SIZE_DEFAULT=20
+MEM0_ADMIN_PAGE_SIZE_MAX=100
 
 MEM0_VECTOR_PROVIDER=pgvector
 POSTGRES_HOST=localhost
@@ -113,6 +130,43 @@ MEM0_EMBEDDER_MODEL=text-embedding-3-small
 OpenAI-backed configurations require `OPENAI_API_KEY`.
 
 `MEM0_WORKERS=1` is the safe local/dev default.
+
+### Admin CMS contract (v1)
+
+The admin endpoints define the contract for an internal CMS operator tool. Key design decisions:
+
+- **Decay scores are NOT computed in the backend.** The backend exposes raw fields (`created_at`, `decay_half_life_days`, `total_visits`, `last_visited_at`, etc.) and the CMS computes display values using the plugin-authority formulas from `~/.config/opencode/plugins/mem0-functional.ts` (`deriveHalfLifeDays`, `computeRecencyScore`).
+- **Popularity and freshness are separate signals.** Popularity comes from persisted visit telemetry (`total_visits`, `visit_ratio`). Freshness comes from `last_visited_at`, `created_at`, `decay_half_life_days`, and optional TTL fields. Never-visited items remain cold regardless of creation time.
+- **Visit recording is explicit.** Detail views do not implicitly record visits via GET. The CMS must call `POST /admin/memories/{memory_id}/visits` with the appropriate reason (`detail_open`, `edit_save`, `copy_source`).
+- **Audit stamps are applied server-side.** All CMS-initiated writes include `impersonated_by=admin`. Copy operations also include `copied_from` provenance metadata.
+- **Remove `MEM0_VISIT_DB_PATH`** to reset visit telemetry (data lives separately from memory metadata).
+
+### Running the CMS
+
+The `cms/` directory holds a Bun + React + Vite admin UI that talks to the admin endpoints above.
+
+```bash
+# Development (hot reload, Vite proxies /admin and /health to the backend)
+cd cms && bun install && bun run dev
+# → http://localhost:5173
+
+# Production build + preview
+cd cms && bun run build && bun run preview
+# → http://localhost:4173
+```
+
+The dev server proxies `/admin`, `/health`, `/memories`, `/search`, `/retrieve`, `/query`, and `/index` to `http://localhost:8000` by default. Set `VITE_BACKEND_PROXY_TARGET` to change the backend origin at dev time, or `VITE_API_BASE_URL` to override the runtime API origin in a production build.
+
+The backend must be running before the CMS can load data.
+
+### CMS v1 exclusions
+
+The admin CMS is an internal operator tool. The following features are not implemented in v1:
+
+- **No authentication or authorization.** Any network client that can reach the admin endpoints can read and write memories. Run the CMS and server on a trusted network only.
+- **No dashboards or analytics views.** The CMS shows raw memory data and index state. There are no charts, graphs, or trend views.
+- **No persistent index history.** The index overview (`GET /admin/index/overview`) reflects the current process state only. Restarting the server clears all index data. The response always sets `limits.current_process_state_only = true`.
+- **No memory exports.** There is no bulk export, download, or backup facility in the CMS or the admin API.
 
 ### Running locally (without Docker)
 
