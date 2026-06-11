@@ -19,20 +19,4 @@ export default defineConfig({
     },
   },
 })
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
 
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    proxy: {
-      "/admin": "http://localhost:8000",
-      "/health": "http://localhost:8000",
-      "/index": "http://localhost:8000",
-      "/memories": "http://localhost:8000",
-      "/query": "http://localhost:8000",
-      "/retrieve": "http://localhost:8000",
-      "/search": "http://localhost:8000",
-    },
-  },
-});
