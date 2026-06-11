@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ScopeKind } from '../lib/api/types.ts'
 import { adminApi } from '../lib/api/admin.ts'
 
@@ -41,47 +41,17 @@ export function ImpersonationPanel({ onImpersonate, totalMemoryCount }: Imperson
     })
   }, [])
 
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const fieldsRef = useRef(fields)
-  fieldsRef.current = fields
-
   const handleChange = (key: string, value: string) => {
     setFields((prev) => ({ ...prev, [key]: value }))
-
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => {
-      const current = fieldsRef.current
-      const scopeFields: [ScopeKind, string][] = [
-        ['user', current.user],
-        ['agent', current.agent],
-        ['run', current.run],
-      ]
-      for (const [scope, id] of scopeFields) {
-        if (id) {
-          onImpersonate(scope, id)
-          return
-        }
-      }
-      onImpersonate('user', current.user)
-    }, 300)
   }
 
   const handleSet = () => {
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-
-    const scopeFields: [ScopeKind, string][] = [
-      ['user', fields.user],
-      ['agent', fields.agent],
-      ['run', fields.run],
-    ]
-    for (const [scope, id] of scopeFields) {
-      if (id) {
-        onImpersonate(scope, id)
-        return
-      }
+    const firstKeyWithValue = IMPERSONATION_FIELDS.find((f) => fields[f.key].trim())
+    if (firstKeyWithValue) {
+      onImpersonate(firstKeyWithValue.key as ScopeKind, fields[firstKeyWithValue.key].trim())
+      return
     }
-    // Fallback: impersonate user even with empty id
-    onImpersonate('user', fields.user)
+    onImpersonate('user', fields.user.trim())
   }
 
   return (

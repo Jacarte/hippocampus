@@ -224,55 +224,35 @@ class AdminService:
             # the mem0 API refuses to return all records without a scope
             # identifier.
             try:
-                try:
-                    import psycopg2  # type: ignore[import-untyped]
-                except ImportError:
-                    import psycopg as psycopg2  # type: ignore[import-untyped,no-redef]
-
-                conn = psycopg2.connect(
-                    host=os.environ.get("POSTGRES_HOST", "localhost"),
-                    port=int(os.environ.get("POSTGRES_PORT", "5432")),
-                    dbname=os.environ.get("POSTGRES_DB", "postgres"),
-                    user=os.environ.get("POSTGRES_USER", "postgres"),
-                    password=os.environ.get("POSTGRES_PASSWORD", "postgres"),
+                rows = self._postgres_fallback_query(
+                    "SELECT DISTINCT "
+                    "payload->>'user_id' AS user_id, "
+                    "payload->>'agent_id' AS agent_id, "
+                    "payload->>'run_id' AS run_id "
+                    "FROM {table} "
+                    "WHERE payload->>'user_id' IS NOT NULL "
+                    "OR payload->>'agent_id' IS NOT NULL "
+                    "OR payload->>'run_id' IS NOT NULL"
                 )
-                try:
-                    table = os.environ.get(
-                        "POSTGRES_COLLECTION", "mem0_memories"
-                    )
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            f"SELECT DISTINCT "
-                            f"payload->>'user_id' AS user_id, "
-                            f"payload->>'agent_id' AS agent_id, "
-                            f"payload->>'run_id' AS run_id "
-                            f"FROM {table} "
-                            f"WHERE payload->>'user_id' IS NOT NULL "
-                            f"OR payload->>'agent_id' IS NOT NULL "
-                            f"OR payload->>'run_id' IS NOT NULL"
-                        )
-                        rows = cur.fetchall()
-                        seen: set[tuple[str | None, str | None, str | None]]
-                        seen = set()
-                        for user_id, agent_id, run_id in rows:
-                            key = (user_id, agent_id, run_id)
-                            if key in seen:
-                                continue
-                            seen.add(key)
-                            record: dict[str, Any] = {}
-                            if user_id:
-                                record["user_id"] = user_id
-                            if agent_id:
-                                record["agent_id"] = agent_id
-                            if run_id:
-                                record["run_id"] = run_id
-                            records.append(record)
-                        logger.debug(
-                            "list_scopes: postgres fallback returned %d records",
-                            len(records),
-                        )
-                finally:
-                    conn.close()
+                seen: set[tuple[str | None, str | None, str | None]]
+                seen = set()
+                for user_id, agent_id, run_id in rows:
+                    key = (user_id, agent_id, run_id)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    record: dict[str, Any] = {}
+                    if user_id:
+                        record["user_id"] = user_id
+                    if agent_id:
+                        record["agent_id"] = agent_id
+                    if run_id:
+                        record["run_id"] = run_id
+                    records.append(record)
+                logger.debug(
+                    "list_scopes: postgres fallback returned %d records",
+                    len(records),
+                )
             except Exception as exc:
                 logger.warning(
                     "list_scopes: postgres fallback failed: %s", exc
@@ -628,10 +608,19 @@ class AdminService:
             try:
                 raw_records = memory_instance.get_all()
             except Exception:
-                # mem0 requires at least one identifier; unscoped listing
-                # is not supported by the library. Return empty gracefully.
-                logger.warning("Unscoped get_all() failed — mem0 requires an identifier")
                 raw_records = []
+            # Fall back to PostgreSQL if mem0 get_all() returned nothing
+            if not raw_records:
+                try:
+                    rows = self._postgres_fallback_query(
+                        "SELECT payload FROM {table}"
+                    )
+                    raw_records = [
+                        row[0] for row in rows
+                        if isinstance(row[0], dict)
+                    ] if rows else []
+                except Exception:
+                    raw_records = []
 
         # Unwrap dict-wrapped response from some mem0 backends
         if isinstance(raw_records, dict):
@@ -864,6 +853,48 @@ class AdminService:
         )
 
     # -- internal helpers -------------------------------------------------
+
+    @staticmethod
+    def _postgres_fallback_query(query: str) -> list[tuple[Any, ...]]:
+        """Execute a PostgreSQL query and return the fetched rows.
+
+        Connects to the PostgreSQL database using environment variables
+        for configuration (``POSTGRES_HOST``, ``POSTGRES_PORT``,
+        ``POSTGRES_DB``, ``POSTGRES_USER``, ``POSTGRES_PASSWORD``) and
+        substitutes ``{table}`` in the query with the
+        ``POSTGRES_COLLECTION`` table name.
+
+        Args:
+            query: SQL query string.  Use ``{table}`` as a placeholder
+                for the configured collection table name.
+
+        Returns:
+            A list of row tuples from the query result.
+
+        Raises:
+            ImportError: When neither ``psycopg2`` nor ``psycopg`` is
+                installed.
+            Exception: Any PostgreSQL connection or query error.
+        """
+        try:
+            import psycopg2  # type: ignore[import-untyped]
+        except ImportError:
+            import psycopg as psycopg2  # type: ignore[import-untyped,no-redef]
+
+        conn = psycopg2.connect(
+            host=os.environ.get("POSTGRES_HOST", "localhost"),
+            port=int(os.environ.get("POSTGRES_PORT", "5432")),
+            dbname=os.environ.get("POSTGRES_DB", "postgres"),
+            user=os.environ.get("POSTGRES_USER", "postgres"),
+            password=os.environ.get("POSTGRES_PASSWORD", "postgres"),
+        )
+        table = os.environ.get("POSTGRES_COLLECTION", "mem0_memories")
+        try:
+            with conn.cursor() as cur:
+                cur.execute(query.format(table=table))
+                return cur.fetchall()
+        finally:
+            conn.close()
 
     def _assemble_list_item(
         self,
