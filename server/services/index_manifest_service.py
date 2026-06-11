@@ -94,6 +94,25 @@ class IndexManifestService:
             "total_files": len(self._files),
         }
 
+    def iter_file_records(self) -> list[tuple[str, "FileRecord"]]:
+        """Return a snapshot of every tracked file as ``(file_key, record)`` pairs.
+
+        Provides a public accessor for the internal ``_files`` map so
+        downstream consumers (e.g. :class:`AdminService.index_overview`)
+        can build per-file projections without reaching into the
+        private attribute directly.  The returned ``file_key`` is the
+        ``"{root}\\x00{file_path}"`` composite used internally to keep
+        multi-root manifests unambiguous; callers that need the split
+        parts should ``partition("\\x00")``.
+
+        Returns:
+            A list of ``(file_key, FileRecord)`` tuples in the order the
+            files were inserted into the manifest.  The list is a fresh
+            snapshot — subsequent mutations to the manifest are not
+            reflected in the returned value.
+        """
+        return [(key, record) for key, record in self._files.items()]
+
     def reset(self) -> None:
         self._roots.clear()
         self._files.clear()

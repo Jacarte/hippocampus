@@ -6,12 +6,16 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from mem0 import Memory
 
 from api_models import (
+    AdminMemoryCopyRequest,
+    AdminMemoryCreateRequest,
+    AdminMemoryUpdateRequest,
+    AdminMemoryVisitRequest,
     CapabilitiesResponse,
     FileChunksRequest,
     IndexResetRequest,
@@ -20,10 +24,12 @@ from api_models import (
     MemoryCreate,
     RetrieveRequest,
     SearchRequest,
+    ScopeType,
     UnifiedQueryRequest,
     WatchStartRequest,
     WatchStopRequest,
 )
+from services.admin_service import AdminService
 from services.anchor_service import AnchorService
 from services.background_job_service import BackgroundJobService
 from services.file_corpus_service import FileCorpusService
@@ -87,6 +93,7 @@ def create_app(
         indexing_service=app.state.indexing_service,
     )
     app.state.job_service = BackgroundJobService(max_workers=20)
+    app.state.admin_service = AdminService()
 
     @app.middleware("http")
     async def correlation_id_middleware(request: Request, call_next: Any) -> Any:
@@ -442,6 +449,303 @@ def create_app(
                     "lexical": True,
                     "semantic": False,
                 },
+            ).model_dump(),
+        )
+
+    # ------------------------------------------------------------------
+    # Admin CMS routes (additive — no changes to public endpoints)
+    # ------------------------------------------------------------------
+    # Handlers are thin; every method delegates to AdminService which
+    # owns audit stamping, visit persistence, and orchestration rules.
+    # ------------------------------------------------------------------
+
+    @app.get("/admin/health", summary="Admin CMS health check")
+    def admin_health(request: Request) -> dict[str, Any]:
+        """Return a readiness metadata payload for the admin CMS surface.
+
+        Unlike ``GET /health`` (which reports public API status), this
+        endpoint returns admin-specific metadata such as the bound visit
+        store path.
+
+        Returns:
+            A dict with ``status`` (``"ok"``), ``service``
+            (``"admin-cms"``), and ``visit_db_path`` (the SQLite path).
+        """
+        return _execute_service_call(
+            "admin_health",
+            lambda: request.app.state.admin_service.health(),
+        )
+
+    @app.get("/admin/memories", summary="Admin list memories")
+    def admin_list_memories(
+        request: Request,
+        scope: ScopeType,
+        scope_id: str,
+        page: int = Query(default=1, ge=1, description="Page number (1-indexed)."),
+        page_size: int = Query(
+            default=20,
+            ge=1,
+            le=100,
+            description="Items per page (max 100).",
+        ),
+        query: str | None = Query(
+            default=None,
+            description=(
+                "Optional case-insensitive substring filter applied to "
+                "the extracted memory content.  Whitespace-only is treated "
+                "as no filter.  The filter is applied before pagination."
+            ),
+        ),
+    ) -> dict[str, Any]:
+        """Return a paginated list of memories scoped to *scope*/*scope_id*.
+
+        The response mirrors :class:`AdminMemoryListResponse` and
+        includes per-memory popularity and freshness raw fields for the
+        CMS.  Each item carries a Pydantic
+        :class:`AdminPopularityInfo` / :class:`AdminFreshnessInfo` pair.
+
+        Args:
+            scope: ``"user"`` / ``"agent"`` / ``"run"``.
+            scope_id: Identifier within the chosen scope.
+            page: 1-indexed page number.
+            page_size: Items per page (clamped to 100).
+            query: Optional case-insensitive substring filter on
+                ``content``; ``None`` or whitespace-only means no filter.
+
+        Returns:
+            Paginated dict with ``items``, ``page``, ``page_size``,
+            ``total_items``, and ``total_pages`` keys.
+        """
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "admin_list_memories",
+            lambda: request.app.state.admin_service.list_memories(
+                memory_instance,
+                scope=scope,
+                scope_id=scope_id,
+                page=page,
+                page_size=page_size,
+                query=query,
+            ),
+        )
+
+    @app.post("/admin/memories", summary="Admin create memory")
+    def admin_create_memory(
+        payload: AdminMemoryCreateRequest, request: Request
+    ) -> dict[str, Any]:
+        """Create a memory under the admin scope with audit stamping.
+
+        The payload specifies ``scope``, ``scope_id``, ``messages``, and
+        optional ``metadata``.  ``impersonated_by=admin`` is stamped by
+        :class:`AdminService` before the write reaches mem0.
+
+        Returns:
+            A dict shaped like :class:`AdminMemoryCreateResponse` with
+            ``memory_id``, ``scope``, ``scope_id``, ``messages``,
+            ``metadata``, and ``impersonated_by``.
+        """
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "admin_create_memory",
+            lambda: request.app.state.admin_service.create_memory(
+                memory_instance, payload
+            ),
+        )
+
+    @app.get("/admin/memories/{memory_id}", summary="Admin get memory detail")
+    def admin_get_memory(memory_id: str, request: Request) -> dict[str, Any]:
+        """Return full detail for a single memory, including audit provenance.
+
+        Args:
+            memory_id: Identifier of the memory to retrieve.
+
+        Returns:
+            A dict shaped like :class:`AdminMemoryDetailResponse` with
+            ``memory_id``, ``scope``, ``scope_id``, ``content``,
+            ``metadata``, ``popularity``, ``freshness``, and ``audit``.
+
+        Raises:
+            HTTPException 404: When *memory_id* does not exist.
+        """
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "admin_get_memory",
+            lambda: request.app.state.admin_service.get_memory(
+                memory_instance, memory_id
+            ),
+        )
+
+    @app.put("/admin/memories/{memory_id}", summary="Admin update memory")
+    def admin_update_memory(
+        memory_id: str, payload: AdminMemoryUpdateRequest, request: Request
+    ) -> dict[str, Any]:
+        """Update a memory's messages and/or metadata under the admin scope.
+
+        ``impersonated_by=admin`` is re-stamped on the metadata, and any
+        prior ``copied_from`` provenance is preserved unless the new
+        metadata explicitly overrides it (the request replaces
+        ``metadata`` wholesale — there is no field-level merge).
+
+        Compare with ``POST /admin/memories`` (no source) and
+        ``POST /admin/memories/{memory_id}/copy`` (creates a new memory
+        under a different scope) — update is the only flow that mutates
+        an existing record's content/metadata in place.
+
+        Args:
+            memory_id: Identifier of the memory to update.
+            payload: Updated ``messages`` and optional ``metadata``.
+
+        Returns:
+            A dict shaped like :class:`AdminMemoryDetailResponse` with
+            the updated fields plus audit block.
+
+        Raises:
+            HTTPException 422: When ``messages`` is empty or any message
+                has an invalid role (validated by Pydantic).
+            HTTPException 400: When *memory_id* does not exist (raised by
+                the service's ``ValueError``).
+        """
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "admin_update_memory",
+            lambda: request.app.state.admin_service.update_memory(
+                memory_instance, memory_id, payload
+            ),
+        )
+
+    @app.delete("/admin/memories/{memory_id}", summary="Admin delete memory")
+    def admin_delete_memory(memory_id: str, request: Request) -> dict[str, Any]:
+        """Delete a memory by id under the admin scope.
+
+        Deletion is intentionally separate from the copy flow: copy
+        creates a new record under the target scope without touching the
+        source, while delete removes the record entirely.  The two
+        endpoints are not coupled.
+
+        Args:
+            memory_id: Identifier of the memory to delete.
+
+        Returns:
+            A dict with ``memory_id`` and ``deleted=True``.
+
+        Raises:
+            HTTPException 400: When *memory_id* does not exist (raised by
+                the service's ``ValueError``).
+        """
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "admin_delete_memory",
+            lambda: request.app.state.admin_service.delete_memory(
+                memory_instance, memory_id
+            ),
+        )
+
+    @app.post(
+        "/admin/memories/{memory_id}/copy",
+        summary="Admin copy memory to a different scope",
+    )
+    def admin_copy_memory(
+        memory_id: str, payload: AdminMemoryCopyRequest, request: Request
+    ) -> dict[str, Any]:
+        """Copy a memory into a new scope with full provenance stamping.
+
+        Read-source → create-target semantics: the source memory is **not**
+        mutated, deleted, or rebound.  A new memory is created in the
+        target scope with the source's messages and metadata, stamped with
+        both ``impersonated_by=admin`` and the
+        ``copied_from={ source_memory_id, source_scope, source_scope_id }``
+        provenance object.
+
+        Compare with ``POST /admin/memories`` (no source — new memory
+        only), ``PUT /admin/memories/{memory_id}`` (mutates an existing
+        record), and ``DELETE /admin/memories/{memory_id}`` (removes the
+        record) — copy is the only flow that introduces a new memory under
+        a different scope while preserving the source.
+
+        Args:
+            memory_id: Identifier of the source memory to copy.
+            payload: ``target_scope`` and ``target_scope_id`` (both
+                validated by :class:`AdminMemoryCopyRequest`).
+
+        Returns:
+            A dict shaped like :class:`AdminMemoryCopyResponse` with
+            ``source_memory_id``, ``target_memory_id``,
+            ``target_scope``, ``target_scope_id``, ``copied_from``, and
+            ``impersonated_by``.
+
+        Raises:
+            HTTPException 422: When ``target_scope`` is not a valid
+                scope literal or ``target_scope_id`` is missing.
+            HTTPException 400: When the source memory does not exist
+                (raised by the service's ``ValueError``).
+        """
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "admin_copy_memory",
+            lambda: request.app.state.admin_service.copy_memory(
+                memory_instance, memory_id, payload
+            ),
+        )
+
+    @app.post(
+        "/admin/memories/{memory_id}/visits",
+        summary="Admin record a visit for a memory",
+    )
+    def admin_record_visit(
+        memory_id: str, payload: AdminMemoryVisitRequest, request: Request
+    ) -> dict[str, Any]:
+        """Record a visit event through the dedicated visit telemetry store.
+
+        Unlike ``GET /admin/memories/{memory_id}``, this endpoint
+        explicitly writes a visit event.  The underlying memory metadata is
+        **not** mutated — only the visit store is updated.
+
+        Args:
+            memory_id: Identifier of the memory being visited.
+            payload: ``reason`` — one of ``"detail_open"``,
+                ``"edit_save"``, or ``"copy_source"``.
+
+        Returns:
+            A dict shaped like :class:`AdminMemoryVisitResponse` with
+            ``memory_id``, ``total_visits``, ``last_visited_at``, and
+            ``reason``.
+
+        Raises:
+            HTTPException 404: When the memory does not exist.
+        """
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "admin_record_visit",
+            lambda: request.app.state.admin_service.record_visit(
+                memory_instance, memory_id, payload.reason
+            ),
+        )
+
+    @app.get("/admin/index/overview", summary="Admin index overview")
+    def admin_index_overview(request: Request) -> dict[str, Any]:
+        """Return an aggregated snapshot of current server-known index state.
+
+        Mirrors the :class:`AdminIndexOverviewResponse` contract — roots,
+        jobs, files, limits (always ``current_process_state_only: true``
+        in v1), and raw visibility/decay inputs for the CMS.
+
+        Contrast with ``GET /index/status``: ``/index/status`` is a
+        compact operational view that returns ``recent_errors`` and a
+        per-root summary for the indexing pipeline, whereas this
+        endpoint additionally carries the full background-job tail
+        and per-file metadata needed for the CMS's visibility-style
+        UI.  Both endpoints share the same in-memory data sources;
+        neither persists state across process restarts.
+
+        Returns:
+            An :class:`AdminIndexOverviewResponse`-compatible dict.
+        """
+        return _execute_service_call(
+            "admin_index_overview",
+            lambda: request.app.state.admin_service.index_overview(
+                indexing_service=request.app.state.indexing_service,
+                job_service=request.app.state.job_service,
+                watch_service=request.app.state.watch_service,
             ).model_dump(),
         )
 
