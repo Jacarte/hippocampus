@@ -90,6 +90,34 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  mem0-cms:
+    build:
+      context: ./cms
+      dockerfile: Dockerfile
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    container_name: mem0-cms
+    image: mem0-cms:latest
+    ports:
+      - "${CMS_PORT:-8080}:80"
+    environment:
+      MEM0_SERVER_URL: http://mem0-server:8000
+    networks:
+      - mem0-network
+    restart: unless-stopped
+    depends_on:
+      mem0-server:
+        condition: service_healthy
+    labels:
+      com.example.description: "Mem0 CMS admin interface"
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   prometheus:
     image: prom/prometheus:v2.54.1
     container_name: mem0-prometheus

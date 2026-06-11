@@ -2,56 +2,12 @@ server {
     listen 80;
     server_name _;
 
+    root /usr/share/nginx/html;
+    index index.html;
+
     # Proxy API and backend routes to the mem0 server
-    location /admin {
-        proxy_pass ${MEM0_SERVER_URL};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /health {
-        proxy_pass ${MEM0_SERVER_URL};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /index {
-        proxy_pass ${MEM0_SERVER_URL};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /memories {
-        proxy_pass ${MEM0_SERVER_URL};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /search {
-        proxy_pass ${MEM0_SERVER_URL};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /retrieve {
-        proxy_pass ${MEM0_SERVER_URL};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /query {
+    # Regex: only match exact path or path with trailing slash, so /index.html is NOT proxied
+    location ~ ^/(admin|health|index|memories|search|retrieve|query)(/|$) {
         proxy_pass ${MEM0_SERVER_URL};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -61,8 +17,6 @@ server {
 
     # SPA fallback — serve index.html for any unmatched route
     location / {
-        root /usr/share/nginx/html;
-        index index.html;
         try_files $uri $uri/ /index.html;
     }
 }
