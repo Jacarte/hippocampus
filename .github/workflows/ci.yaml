@@ -15,9 +15,6 @@ on:
 jobs:
   docker-cms:
     runs-on: ubuntu-latest
-        
-    env:
-      IMAGE_NAME: mem0cms
     steps:
       - uses: actions/checkout@v4
 
@@ -33,7 +30,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/mem0cms
           tags: |
             type=ref,event=branch
             type=sha,prefix=
@@ -43,7 +40,8 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./cms
+          file: ./cms/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -51,8 +49,6 @@ jobs:
 
   build-and-push:
     runs-on: ubuntu-latest
-    env:
-      IMAGE_NAME: mem0server
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -70,7 +66,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/mem0server
           tags: |
             type=ref,event=branch
             type=sha,prefix=
@@ -79,7 +75,6 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: .
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
