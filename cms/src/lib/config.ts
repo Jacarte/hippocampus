@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE_URL = 'http://192.168.0.160:18000'
+const DEFAULT_API_BASE_URL = 'http://mem0-server:18000'
 
 function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, '')
