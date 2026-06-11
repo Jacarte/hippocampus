@@ -1,4 +1,5 @@
-const DEFAULT_API_BASE_URL = 'http://mem0-server:18000'
+// In production behind nginx, API calls use same-origin — nginx proxies /admin etc.
+const DEFAULT_API_BASE_URL = ''
 
 function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, '')
