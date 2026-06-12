@@ -328,6 +328,52 @@ def test_admin_delete_memory_returns_confirmation(
         assert get_resp.status_code == 400
 
 
+def test_admin_delete_empty_memories_returns_deleted_count(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MEM0_VISIT_DB_PATH", ":memory:")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    app = server.create_app(memory_factory=_FakeMemory, startup_enabled=False)
+
+    with TestClient(app) as client:
+        client.post("/configure", json=_MINIMAL_CONFIG)
+        client.post(
+            "/admin/memories",
+            json={
+                "scope": "user",
+                "scope_id": "test-user",
+                "messages": [{"role": "user", "content": "keep me"}],
+            },
+        )
+        client.post(
+            "/admin/memories",
+            json={
+                "scope": "user",
+                "scope_id": "test-user",
+                "messages": [{"role": "user", "content": "   "}],
+            },
+        )
+
+        response = client.delete("/admin/memories/empty")
+        list_response = client.get(
+            "/admin/memories",
+            params={"page": 1, "page_size": 20},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "deleted_count": 1,
+        "message": "Deleted 1 empty memories",
+    }
+    assert list_response.status_code == 200
+    assert list_response.json()["total_items"] == 1
+    assert list_response.json()["items"][0]["content"] == "keep me"
+
+
 def test_admin_copy_memory_returns_provenance(monkeypatch: MonkeyPatch) -> None:
     """POST /admin/memories/{id}/copy returns provenance and does not delete source."""
     monkeypatch.setenv("MEM0_VISIT_DB_PATH", ":memory:")

@@ -66,6 +66,9 @@ export const adminApi = {
   deleteMemory(memoryId: string): Promise<void> {
     return apiClient.delete(`/admin/memories/${memoryId}`)
   },
+  deleteEmptyMemories(): Promise<{ deleted_count: number; message: string }> {
+    return apiClient.delete('/admin/memories/empty')
+  },
   getIndexOverview(): Promise<AdminIndexOverviewResponse> {
     return apiClient.get('/admin/index/overview')
   },

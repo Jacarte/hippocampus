@@ -838,6 +838,103 @@ def test_admin_service_delete_unknown_memory_raises():
         service.delete_memory(memory, "missing")
 
 
+def test_admin_service_delete_empty_memories_removes_only_empty_records():
+    service = _make_admin_service()
+    class _WrappedGetAllMemory(_FakeMemory):
+        def get_all(self, *, user_id=None, agent_id=None, run_id=None) -> Any:
+            assert user_id is None
+            assert agent_id is None
+            assert run_id is None
+            return {"results": list(self.records.values())}
+
+    memory = _WrappedGetAllMemory()
+    memory.records = {
+        "mem-1": {"id": "mem-1", "memory": "", "messages": []},
+        "mem-2": {"id": "mem-2", "content": "   ", "messages": []},
+        "mem-3": {
+            "id": "mem-3",
+            "messages": [
+                {"role": "user", "content": ""},
+                {"role": "assistant", "content": "   "},
+            ],
+        },
+        "mem-4": {"id": "mem-4", "memory": "keep me", "messages": []},
+    }
+
+    response = service.delete_empty_memories(memory)
+
+    assert response == {
+        "deleted_count": 3,
+        "message": "Deleted 3 empty memories",
+    }
+    assert memory.deletes == ["mem-1", "mem-2", "mem-3"]
+    assert set(memory.records) == {"mem-4"}
+
+
+def test_admin_service_delete_empty_memories_falls_back_to_postgres():
+    service = _make_admin_service()
+
+    class _GetAllEmptyMemory(_FakeMemory):
+        def get_all(self, *, user_id=None, agent_id=None, run_id=None):
+            return []
+
+    memory = _GetAllEmptyMemory()
+    rows = [
+        ({"id": "mem-1", "memory": ""},),
+        ({"id": "mem-2", "messages": [{"role": "user", "content": "still here"}]},),
+        ({"id": "mem-3", "content": "   "},),
+        ("ignore-me",),
+    ]
+    memory.records = {
+        "mem-1": {"id": "mem-1", "memory": ""},
+        "mem-2": {
+            "id": "mem-2",
+            "messages": [{"role": "user", "content": "still here"}],
+        },
+        "mem-3": {"id": "mem-3", "content": "   "},
+    }
+
+    service._postgres_fallback_query = MagicMock(return_value=rows)
+
+    response = service.delete_empty_memories(memory)
+
+    service._postgres_fallback_query.assert_called_once_with(
+        "SELECT payload FROM {table}"
+    )
+    assert response == {
+        "deleted_count": 2,
+        "message": "Deleted 2 empty memories",
+    }
+    assert memory.deletes == ["mem-1", "mem-3"]
+    assert set(memory.records) == {"mem-2"}
+
+
+def test_admin_service_delete_empty_memories_continues_after_delete_failure():
+    service = _make_admin_service()
+
+    class _PartiallyFailingMemory(_FakeMemory):
+        def delete(self, memory_id):
+            if memory_id == "mem-2":
+                raise RuntimeError("boom")
+            super().delete(memory_id)
+
+    memory = _PartiallyFailingMemory()
+    memory.records = {
+        "mem-1": {"id": "mem-1", "memory": ""},
+        "mem-2": {"id": "mem-2", "content": ""},
+        "mem-3": {"id": "mem-3", "messages": [{"role": "user", "content": ""}]},
+    }
+
+    response = service.delete_empty_memories(memory)
+
+    assert response == {
+        "deleted_count": 2,
+        "message": "Deleted 2 empty memories",
+    }
+    assert memory.deletes == ["mem-1", "mem-3"]
+    assert set(memory.records) == {"mem-2"}
+
+
 def test_admin_service_index_overview_returns_contract_shape():
     service = _make_admin_service()
     indexing_service = MagicMock()
