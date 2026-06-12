@@ -10,17 +10,19 @@ type FiltersPanelProps = {
   onQueryChange: (query: string) => void
   onTypeChange: (type: string) => void
   onProjectChange: (project: string) => void
+  type?: string
+  project?: string
 }
 
-export function FiltersPanel({ onScopeChange, onQueryChange, onTypeChange, onProjectChange }: FiltersPanelProps) {
+export function FiltersPanel({ onScopeChange, onQueryChange, onTypeChange, onProjectChange, type: propType, project: propProject }: FiltersPanelProps) {
   const [search, setSearch] = useState('')
-  const [typeValue, setTypeValue] = useState('')
+  const [typeValue, setTypeValue] = useState(propType ?? '')
   const [scopeFilters, setScopeFilters] = useState<Record<string, string>>({
     user: '',
     agent: '',
     run: '',
   })
-  const [project, setProject] = useState('')
+  const [project, setProject] = useState(propProject ?? '')
   const [suggestions, setSuggestions] = useState<Record<string, string[]>>({
     user: [],
     agent: [],
@@ -38,6 +40,10 @@ export function FiltersPanel({ onScopeChange, onQueryChange, onTypeChange, onPro
       // Scopes endpoint may fail; silently keep empty suggestions
     })
   }, [])
+
+  useEffect(() => { setTypeValue(propType ?? '') }, [propType])
+  useEffect(() => { setProject(propProject ?? '') }, [propProject])
+  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current) }, [])
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -67,6 +73,7 @@ export function FiltersPanel({ onScopeChange, onQueryChange, onTypeChange, onPro
   }
 
   const handleClear = () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
     setSearch('')
     setTypeValue('')
     setScopeFilters({ user: '', agent: '', run: '' })

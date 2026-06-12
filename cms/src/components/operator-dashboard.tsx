@@ -16,7 +16,7 @@ export function OperatorDashboard() {
   return (
     <div className="page-stack">
       <ImpersonationPanel onImpersonate={handleImpersonate} totalMemoryCount={totalMemoryCount} />
-      <FiltersPanel onScopeChange={handleImpersonate} onQueryChange={setQuery} onTypeChange={setTypeFilter} onProjectChange={setProjectFilter} />
+      <FiltersPanel onScopeChange={handleImpersonate} onQueryChange={setQuery} onTypeChange={setTypeFilter} onProjectChange={setProjectFilter} type={typeFilter} project={projectFilter} />
       <AddMemoryPanel scope={scope} scopeId={scopeId} onAddSuccess={triggerRefresh} />
       <MemoryListShell
         scope={scope}
