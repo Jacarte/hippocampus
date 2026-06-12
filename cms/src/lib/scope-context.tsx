@@ -8,6 +8,10 @@ type ScopeContextValue = {
   setScopeId: (id: string) => void
   query: string
   setQuery: (q: string) => void
+  typeFilter: string
+  setTypeFilter: (t: string) => void
+  projectFilter: string
+  setProjectFilter: (p: string) => void
   refreshKey: number
   triggerRefresh: () => void
   totalMemoryCount: number | undefined
@@ -20,6 +24,8 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
   const [scope, setScope] = useState<ScopeKind>('user')
   const [scopeId, setScopeId] = useState('')
   const [query, setQuery] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+  const [projectFilter, setProjectFilter] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
   const [totalMemoryCount, setTotalMemoryCount] = useState<number>()
 
@@ -34,6 +40,10 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
         setScopeId,
         query,
         setQuery,
+        typeFilter,
+        setTypeFilter,
+        projectFilter,
+        setProjectFilter,
         refreshKey,
         triggerRefresh,
         totalMemoryCount,

@@ -42,6 +42,8 @@ export const adminApi = {
       page: filters.page ?? 1,
       page_size: filters.pageSize ?? 20,
       query: filters.query,
+      type: filters.type,
+      project: filters.project,
     })
 
     return apiClient.get(`/admin/memories${query}`)

@@ -23,6 +23,8 @@ export type AdminMemoryFilters = PaginationInput & {
   scope?: ScopeKind
   scopeId?: string
   query?: string
+  type?: string
+  project?: string
 }
 
 export type PopularitySummary = {

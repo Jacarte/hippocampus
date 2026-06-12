@@ -6,7 +6,7 @@ import { useScopeContext } from '../lib/scope-context.tsx'
 import type { ScopeKind } from '../lib/api/types.ts'
 
 export function OperatorDashboard() {
-  const { scope, setScope, scopeId, setScopeId, query, setQuery, refreshKey, triggerRefresh, totalMemoryCount, setTotalMemoryCount } = useScopeContext()
+  const { scope, setScope, scopeId, setScopeId, query, setQuery, typeFilter, setTypeFilter, projectFilter, setProjectFilter, refreshKey, triggerRefresh, totalMemoryCount, setTotalMemoryCount } = useScopeContext()
 
   const handleImpersonate = (newScope: ScopeKind, newScopeId: string) => {
     setScope(newScope)
@@ -16,12 +16,14 @@ export function OperatorDashboard() {
   return (
     <div className="page-stack">
       <ImpersonationPanel onImpersonate={handleImpersonate} totalMemoryCount={totalMemoryCount} />
-      <FiltersPanel onScopeChange={handleImpersonate} onQueryChange={setQuery} />
+      <FiltersPanel onScopeChange={handleImpersonate} onQueryChange={setQuery} onTypeChange={setTypeFilter} onProjectChange={setProjectFilter} />
       <AddMemoryPanel scope={scope} scopeId={scopeId} onAddSuccess={triggerRefresh} />
       <MemoryListShell
         scope={scope}
         scopeId={scopeId}
         query={query}
+        type={typeFilter}
+        project={projectFilter}
         refreshKey={refreshKey}
         onTotalCount={setTotalMemoryCount}
         onDeleteSuccess={triggerRefresh}

@@ -3,31 +3,27 @@ import { Panel } from './panel.tsx'
 import { adminApi } from '../lib/api/admin.ts'
 import type { ScopeKind } from '../lib/api/types.ts'
 
-const SCOPE_KEYS = new Set(['user', 'agent', 'run'])
-
-const FILTER_FIELDS = [
-  { label: 'User', key: 'user' as const },
-  { label: 'Agent', key: 'agent' as const },
-  { label: 'Project', key: 'project' as const },
-  { label: 'Run', key: 'run' as const },
-] as const
+const MEMORY_TYPES = ['', 'stable-fact', 'decision', 'procedure', 'problem-fix'] as const
 
 type FiltersPanelProps = {
   onScopeChange: (scope: ScopeKind, scopeId: string) => void
-  onQueryChange?: (query: string) => void
+  onQueryChange: (query: string) => void
+  onTypeChange: (type: string) => void
+  onProjectChange: (project: string) => void
 }
 
-export function FiltersPanel({ onScopeChange, onQueryChange }: FiltersPanelProps) {
-  const [filters, setFilters] = useState<Record<string, string>>({
+export function FiltersPanel({ onScopeChange, onQueryChange, onTypeChange, onProjectChange }: FiltersPanelProps) {
+  const [search, setSearch] = useState('')
+  const [typeValue, setTypeValue] = useState('')
+  const [scopeFilters, setScopeFilters] = useState<Record<string, string>>({
     user: '',
     agent: '',
-    project: '',
     run: '',
   })
+  const [project, setProject] = useState('')
   const [suggestions, setSuggestions] = useState<Record<string, string[]>>({
     user: [],
     agent: [],
-    project: [],
     run: [],
   })
 
@@ -36,7 +32,6 @@ export function FiltersPanel({ onScopeChange, onQueryChange }: FiltersPanelProps
       setSuggestions({
         user: scopes.users,
         agent: scopes.agents,
-        project: scopes.projects,
         run: scopes.runs,
       })
     }).catch(() => {
@@ -46,30 +41,40 @@ export function FiltersPanel({ onScopeChange, onQueryChange }: FiltersPanelProps
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const handleChange = (key: string, value: string) => {
-    if (SCOPE_KEYS.has(key)) {
-      // Scope fields: set the active scope and clear other scope fields
-      setFilters({ user: '', agent: '', project: filters.project, run: '', [key]: value })
-    } else {
-      // Project field: text-only query
-      setFilters((prev) => ({ ...prev, [key]: value }))
-    }
-
+  const debouncedCallback = (fn: () => void) => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => {
-      if (SCOPE_KEYS.has(key)) {
-        onScopeChange(key as ScopeKind, value)
-      } else {
-        onQueryChange?.(value)
-      }
-    }, 300)
+    debounceRef.current = setTimeout(fn, 300)
+  }
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value)
+    debouncedCallback(() => onQueryChange(value))
+  }
+
+  const handleTypeChange = (value: string) => {
+    setTypeValue(value)
+    onTypeChange(value)
+  }
+
+  const handleScopeChange = (key: string, value: string) => {
+    setScopeFilters({ user: '', agent: '', run: '', [key]: value })
+    debouncedCallback(() => onScopeChange(key as ScopeKind, value))
+  }
+
+  const handleProjectChange = (value: string) => {
+    setProject(value)
+    debouncedCallback(() => onProjectChange(value))
   }
 
   const handleClear = () => {
-    const cleared = { user: '', agent: '', project: '', run: '' }
-    setFilters(cleared)
+    setSearch('')
+    setTypeValue('')
+    setScopeFilters({ user: '', agent: '', run: '' })
+    setProject('')
+    onQueryChange('')
+    onTypeChange('')
     onScopeChange('user', '')
-    onQueryChange?.('')
+    onProjectChange('')
   }
 
   return (
@@ -82,25 +87,57 @@ export function FiltersPanel({ onScopeChange, onQueryChange }: FiltersPanelProps
         </button>
       }
     >
+      <div className="field-stack">
+        <span className="field-label">Search</span>
+        <input
+          type="text"
+          className="control-input"
+          placeholder="Search memories…"
+          value={search}
+          onChange={(e) => handleSearchChange(e.target.value)}
+        />
+      </div>
       <div className="filters-grid">
-        {FILTER_FIELDS.map((field) => (
-          <label key={field.label} className="field-stack">
-            <span className="field-label">{field.label}</span>
+        <label className="field-stack">
+          <span className="field-label">Type</span>
+          <select
+            className="control-select"
+            value={typeValue}
+            onChange={(e) => handleTypeChange(e.target.value)}
+          >
+            {MEMORY_TYPES.map((t) => (
+              <option key={t} value={t}>{t || 'All'}</option>
+            ))}
+          </select>
+        </label>
+        {(['user', 'agent', 'run'] as const).map((key) => (
+          <label key={key} className="field-stack">
+            <span className="field-label">{key.charAt(0).toUpperCase() + key.slice(1)}</span>
             <input
               type="text"
               className="control-input"
               placeholder="e.g. alice"
-              value={filters[field.key]}
-              onChange={(e) => handleChange(field.key, e.target.value)}
-              list={`filter-suggestions-${field.key}`}
+              value={scopeFilters[key]}
+              onChange={(e) => handleScopeChange(key, e.target.value)}
+              list={`filter-suggestions-${key}`}
             />
-            <datalist id={`filter-suggestions-${field.key}`}>
-              {suggestions[field.key].map((item) => (
+            <datalist id={`filter-suggestions-${key}`}>
+              {suggestions[key].map((item) => (
                 <option key={item} value={item} />
               ))}
             </datalist>
           </label>
         ))}
+        <label className="field-stack">
+          <span className="field-label">Project</span>
+          <input
+            type="text"
+            className="control-input"
+            placeholder="e.g. my-project"
+            value={project}
+            onChange={(e) => handleProjectChange(e.target.value)}
+          />
+        </label>
       </div>
     </Panel>
   )

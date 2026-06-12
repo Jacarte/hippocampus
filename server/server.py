@@ -556,6 +556,21 @@ def create_app(
                 "as no filter.  The filter is applied before pagination."
             ),
         ),
+        type: str | None = Query(
+            default=None,
+            description=(
+                "Optional case-insensitive exact filter on "
+                "metadata.type. Whitespace-only is treated as no filter."
+            ),
+        ),
+        project: str | None = Query(
+            default=None,
+            description=(
+                "Optional case-insensitive exact filter on metadata.project "
+                "or metadata.project_id. Whitespace-only is treated as no "
+                "filter."
+            ),
+        ),
     ) -> dict[str, Any]:
         """Return a paginated list of memories, optionally filtered by scope.
 
@@ -579,6 +594,10 @@ def create_app(
             page_size: Items per page (clamped to 100).
             query: Optional case-insensitive substring filter on
                 ``content``; ``None`` or whitespace-only means no filter.
+            type: Optional case-insensitive exact filter on
+                ``metadata.type``.
+            project: Optional case-insensitive exact filter on
+                ``metadata.project`` or ``metadata.project_id``.
 
         Returns:
             Paginated dict with ``items``, ``page``, ``page_size``,
@@ -594,6 +613,8 @@ def create_app(
                 page=page,
                 page_size=page_size,
                 query=query,
+                type=type,
+                project=project,
             ),
         )
 

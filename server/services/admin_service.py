@@ -536,6 +536,8 @@ class AdminService:
         page: int,
         page_size: int,
         query: str | None = None,
+        type: str | None = None,
+        project: str | None = None,
     ) -> dict[str, Any]:
         """List memories with normalized aggregates.
 
@@ -556,6 +558,12 @@ class AdminService:
         is treated as no filter.  The filter is applied **before** paging
         so ``total_items`` / ``total_pages`` reflect the filtered count.
 
+        When *type* or *project* is provided the listing is further filtered
+        by exact case-insensitive metadata matches. ``type`` matches
+        ``metadata.type``; ``project`` matches either ``metadata.project`` or
+        ``metadata.project_id``. Empty/whitespace-only values are treated as
+        no filter. These metadata filters are also applied **before** paging.
+
         Args:
             memory_instance: The mem0 memory instance to read from.
             scope: ``"user"`` / ``"agent"`` / ``"run"``.  When omitted
@@ -567,6 +575,12 @@ class AdminService:
             query: Optional case-insensitive substring filter applied to
                 the extracted memory content; ``None`` or whitespace-only
                 means no filter.
+            type: Optional case-insensitive exact filter on
+                ``metadata.type``; ``None`` or whitespace-only means no
+                filter.
+            project: Optional case-insensitive exact filter on
+                ``metadata.project`` or ``metadata.project_id``; ``None`` or
+                whitespace-only means no filter.
 
         Returns:
             A dict with ``items``, ``page``, ``page_size``, ``total_items``,
@@ -584,6 +598,8 @@ class AdminService:
             raise ValueError("page_size must be >= 1")
 
         normalized_query = (query or "").strip()
+        normalized_type = (type or "").strip()
+        normalized_project = (project or "").strip()
         scope_provided = scope is not None and scope_id is not None and bool(scope_id)
 
         if scope_provided:
@@ -642,6 +658,34 @@ class AdminService:
                             return True
                 return False
             items = [record for record in items if _matches(record)]
+
+        if normalized_type:
+            type_needle = normalized_type.casefold()
+
+            def _matches_type(record: Any) -> bool:
+                metadata = self._safe_metadata(record)
+                memory_type = metadata.get("type") if metadata else None
+                return (
+                    isinstance(memory_type, str)
+                    and memory_type.casefold() == type_needle
+                )
+
+            items = [record for record in items if _matches_type(record)]
+
+        if normalized_project:
+            project_needle = normalized_project.casefold()
+
+            def _matches_project(record: Any) -> bool:
+                metadata = self._safe_metadata(record)
+                if not metadata:
+                    return False
+                for key in ("project", "project_id"):
+                    value = metadata.get(key)
+                    if isinstance(value, str) and value.casefold() == project_needle:
+                        return True
+                return False
+
+            items = [record for record in items if _matches_project(record)]
 
         total_items = len(items)
         start = (page - 1) * page_size

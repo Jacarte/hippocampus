@@ -8,6 +8,8 @@ type MemoryListShellProps = {
   scope: ScopeKind
   scopeId: string
   query?: string
+  type?: string
+  project?: string
   refreshKey?: number
   onTotalCount?: (count: number) => void
   onDeleteSuccess?: () => void
@@ -38,7 +40,7 @@ function formatDate(dateStr: string | null): string {
   }
 }
 
-export function MemoryListShell({ scope, scopeId, query, refreshKey, onTotalCount, onDeleteSuccess }: MemoryListShellProps) {
+export function MemoryListShell({ scope, scopeId, query, type, project, refreshKey, onTotalCount, onDeleteSuccess }: MemoryListShellProps) {
   const [items, setItems] = useState<AdminMemorySummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -52,7 +54,7 @@ export function MemoryListShell({ scope, scopeId, query, refreshKey, onTotalCoun
 
   useEffect(() => {
     setPage(1)
-  }, [scope, scopeId, query, refreshKey])
+  }, [scope, scopeId, query, type, project, refreshKey])
 
   useEffect(() => {
     let cancelled = false
@@ -63,6 +65,8 @@ export function MemoryListShell({ scope, scopeId, query, refreshKey, onTotalCoun
     const filters: AdminMemoryFilters = {
       ...(scopeId ? { scope, scopeId } : {}),
       ...(query ? { query } : {}),
+      ...(type ? { type } : {}),
+      ...(project ? { project } : {}),
       page,
       pageSize: 20,
     }
@@ -87,7 +91,7 @@ export function MemoryListShell({ scope, scopeId, query, refreshKey, onTotalCoun
     return () => {
       cancelled = true
     }
-  }, [scope, scopeId, query, refreshKey, page])
+  }, [scope, scopeId, query, type, project, refreshKey, page])
 
   const allSelected = items.length > 0 && selectedIds.size === items.length
 
