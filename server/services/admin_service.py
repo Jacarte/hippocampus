@@ -440,6 +440,11 @@ class AdminService:
             raw_records = memory_instance.get_all()
         except Exception:
             raw_records = []
+
+        # Unwrap dict-wrapped response BEFORE checking emptiness
+        if isinstance(raw_records, dict):
+            raw_records = raw_records.get("results") or raw_records.get("data") or []
+
         if not raw_records:
             try:
                 rows = self._postgres_fallback_query("SELECT payload FROM {table}")
@@ -463,13 +468,9 @@ class AdminService:
             if not memory_id:
                 continue
             try:
-                memory_instance.delete(memory_id)
-            except TypeError:
-                try:
-                    memory_instance.delete(memory_id=memory_id)
-                except Exception:
-                    continue
+                memory_instance.delete(memory_id=memory_id)
             except Exception:
+                logger.warning("Failed to delete empty memory %s", memory_id, exc_info=True)
                 continue
             deleted_count += 1
 
@@ -1038,7 +1039,7 @@ class AdminService:
             "content": self._extract_content(record),
             "metadata": metadata,
             "popularity": self._popularity_payload(aggregate, max_total),
-            "freshness": self._freshness_payload(aggregate, metadata),
+            "freshness": self._freshness_payload(aggregate, metadata, record),
         }
 
     def _assemble_detail_item(self, record: dict[str, Any]) -> dict[str, Any]:
@@ -1082,7 +1083,7 @@ class AdminService:
             "content": self._extract_content(record),
             "metadata": metadata,
             "popularity": self._popularity_payload(aggregate, max_total),
-            "freshness": self._freshness_payload(aggregate, metadata),
+            "freshness": self._freshness_payload(aggregate, metadata, record),
             "audit": AdminAuditInfo(
                 impersonated_by=self._extract_impersonated_by(metadata),
                 copied_from=self._extract_copied_from(metadata),
@@ -1154,6 +1155,7 @@ class AdminService:
     def _freshness_payload(
         aggregate: VisitAggregates,
         metadata: dict[str, Any] | None,
+        record: dict[str, Any] | None = None,
     ) -> AdminFreshnessInfo:
         """Build an :class:`AdminFreshnessInfo` payload from store + metadata.
 
@@ -1179,14 +1181,24 @@ class AdminService:
             metadata: The memory's metadata dict (or ``None``); used to
                 read the decay-input fields ``created_at``,
                 ``decay_half_life_days``, and ``ttl_expires_at``.
+            record: The raw memory record (or ``None``); used as a
+                fallback source for ``created_at`` from the ``anchor``
+                object when ``metadata`` has no ``created_at``.
 
         Returns:
             An :class:`AdminFreshnessInfo` Pydantic model.
         """
+        created_at = _extract_created_at(metadata)
+        if created_at is None and isinstance(record, dict):
+            anchor = record.get("anchor")
+            if isinstance(anchor, dict):
+                anchor_ts = anchor.get("created_at")
+                if isinstance(anchor_ts, str):
+                    created_at = anchor_ts
         return AdminFreshnessInfo(
             last_visited_at=aggregate.last_visited_at,
             never_visited=aggregate.never_visited,
-            created_at=_extract_created_at(metadata),
+            created_at=created_at,
             decay_half_life_days=_extract_decay_half_life_days(metadata),
             ttl_expires_at=_extract_ttl_expires_at(metadata),
         )
