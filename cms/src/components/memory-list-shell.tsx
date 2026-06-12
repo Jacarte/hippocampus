@@ -51,6 +51,7 @@ export function MemoryListShell({ scope, scopeId, query, type, project, refreshK
   const [bulkTargetScope, setBulkTargetScope] = useState<ScopeKind>('user')
   const [bulkTargetScopeId, setBulkTargetScopeId] = useState('')
   const [bulkCopying, setBulkCopying] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
   useEffect(() => {
     setPage(1)
@@ -142,6 +143,22 @@ export function MemoryListShell({ scope, scopeId, query, type, project, refreshK
     }
   }
 
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return
+    setBulkDeleting(true)
+    const ids = [...selectedIds]
+    for (const id of ids) {
+      try {
+        await adminApi.deleteMemory(id)
+      } catch {
+        // continue deleting remaining items
+      }
+    }
+    setSelectedIds(new Set())
+    setBulkDeleting(false)
+    onDeleteSuccess?.()
+  }
+
   return (
     <section className="panel memory-section" aria-label="Memory list shell">
       <div className="memory-toolbar">
@@ -150,7 +167,7 @@ export function MemoryListShell({ scope, scopeId, query, type, project, refreshK
           <span className="panel-title">Memories</span>
         </label>
 
-        <div className="toolbar-actions">
+          <div className="toolbar-actions">
           <button
             type="button"
             className="button-ghost"
@@ -158,6 +175,14 @@ export function MemoryListShell({ scope, scopeId, query, type, project, refreshK
             onClick={() => setBulkCopyActive((v) => !v)}
           >
             Copy to user…{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
+          </button>
+          <button
+            type="button"
+            className="button-text is-danger"
+            disabled={selectedIds.size === 0 || bulkDeleting}
+            onClick={handleBulkDelete}
+          >
+            {bulkDeleting ? 'Deleting…' : `Delete${selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}`}
           </button>
           <div className="legend-stack" aria-label="Heat legend">
             <span className="legend-copy">heat</span>

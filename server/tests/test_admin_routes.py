@@ -337,7 +337,20 @@ def test_admin_delete_empty_memories_returns_deleted_count(
     server = importlib.import_module("server")
     server = importlib.reload(server)
 
-    app = server.create_app(memory_factory=_FakeMemory, startup_enabled=False)
+    class _UnscopedFakeMemory(_FakeMemory):
+        def get_all(
+            self, *, user_id: str | None = None, agent_id: str | None = None,
+            run_id: str | None = None,
+        ) -> list[dict[str, Any]]:
+            if user_id is None and agent_id is None and run_id is None:
+                return list(self.records.values())
+            return super().get_all(
+                user_id=user_id, agent_id=agent_id, run_id=run_id
+            )
+
+    app = server.create_app(
+        memory_factory=_UnscopedFakeMemory, startup_enabled=False
+    )
 
     with TestClient(app) as client:
         client.post("/configure", json=_MINIMAL_CONFIG)
@@ -1084,10 +1097,9 @@ def test_admin_list_memories_rejects_invalid_pagination(
     assert resp.status_code == 422
 
 
-def test_admin_list_memories_rejects_missing_scope(
+def test_admin_list_memories_allows_missing_scope(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """scope and scope_id are required query params for list."""
     monkeypatch.setenv("MEM0_VISIT_DB_PATH", ":memory:")
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
@@ -1097,10 +1109,15 @@ def test_admin_list_memories_rejects_missing_scope(
     app = server.create_app(memory_factory=_FakeMemory, startup_enabled=False)
 
     with TestClient(app) as client:
+        client.post("/configure", json=_MINIMAL_CONFIG)
         resp = client.get(
             "/admin/memories", params={"page": 1, "page_size": 20}
         )
-    assert resp.status_code == 422
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["page"] == 1
+    assert payload["page_size"] == 20
+    assert payload["items"] == []
 
 
 def test_admin_list_memories_rejects_invalid_scope_value(

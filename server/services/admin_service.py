@@ -434,6 +434,50 @@ class AdminService:
         memory_instance.delete(memory_id=memory_id)
         return {"memory_id": memory_id, "deleted": True}
 
+    def delete_empty_memories(self, memory_instance: Any) -> dict[str, Any]:
+        trace_backend_operation("admin.delete_empty_memories")
+        try:
+            raw_records = memory_instance.get_all()
+        except Exception:
+            raw_records = []
+        if not raw_records:
+            try:
+                rows = self._postgres_fallback_query("SELECT payload FROM {table}")
+                raw_records = [
+                    row[0] for row in rows if row and isinstance(row[0], dict)
+                ] if rows else []
+            except Exception:
+                raw_records = []
+        if isinstance(raw_records, dict):
+            raw_records = raw_records.get("results") or raw_records.get("data") or []
+
+        records = self._anchor_service.normalize_payload(raw_records) or []
+        if not isinstance(records, list):
+            records = list(records) if records else []
+
+        deleted_count = 0
+        for record in records:
+            if self._extract_content(record).strip() != "":
+                continue
+            memory_id = self._extract_memory_id(record)
+            if not memory_id:
+                continue
+            try:
+                memory_instance.delete(memory_id)
+            except TypeError:
+                try:
+                    memory_instance.delete(memory_id=memory_id)
+                except Exception:
+                    continue
+            except Exception:
+                continue
+            deleted_count += 1
+
+        return {
+            "deleted_count": deleted_count,
+            "message": f"Deleted {deleted_count} empty memories",
+        }
+
     def copy_memory(
         self,
         memory_instance: Any,

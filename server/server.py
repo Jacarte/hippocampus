@@ -702,6 +702,16 @@ def create_app(
             ),
         )
 
+    @app.delete("/admin/memories/empty", summary="Delete all empty memories")
+    def admin_delete_empty_memories(request: Request) -> dict[str, Any]:
+        memory_instance = get_memory_instance(request)
+        return _execute_service_call(
+            "admin_delete_empty_memories",
+            lambda: request.app.state.admin_service.delete_empty_memories(
+                memory_instance
+            ),
+        )
+
     @app.delete("/admin/memories/{memory_id}", summary="Admin delete memory")
     def admin_delete_memory(memory_id: str, request: Request) -> dict[str, Any]:
         """Delete a memory by id under the admin scope.

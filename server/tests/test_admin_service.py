@@ -913,6 +913,9 @@ def test_admin_service_delete_empty_memories_continues_after_delete_failure():
     service = _make_admin_service()
 
     class _PartiallyFailingMemory(_FakeMemory):
+        def get_all(self, *, user_id=None, agent_id=None, run_id=None):
+            return list(self.records.values())
+
         def delete(self, memory_id):
             if memory_id == "mem-2":
                 raise RuntimeError("boom")
