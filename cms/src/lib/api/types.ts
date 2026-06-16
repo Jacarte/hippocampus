@@ -50,7 +50,7 @@ export type AdminMemorySummary = {
   scope: ScopeKind
   scope_id: string
   content: string
-  metadata: Record<string, unknown>
+  metadata: Record<string, unknown> | null
   popularity?: PopularitySummary
   freshness?: FreshnessSummary
 }

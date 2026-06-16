@@ -1000,6 +1000,198 @@ def test_admin_service_list_memories_uses_postgres_row_uuid_when_payload_lacks_i
     assert item["freshness"].created_at == "2026-06-01T12:00:00Z"
 
 
+def test_admin_service_extract_content_fallback_for_top_level_data():
+    """Regression: ``_extract_content`` must surface ``payload.data`` when the
+    fallback row carries the memory text in a top-level ``"data"`` field
+    (i.e. none of the canonical ``memory`` / ``content`` / ``messages``
+    fields are populated).
+
+    The test builds a fallback row with the exact failing shape observed in
+    production (``data``, ``type``, ``anchor``, ``created_at``, ``user_id``)
+    and asserts the list item's ``content`` is the non-empty string held in
+    ``"data"``.  See the notepad ``.omo/notepads/cms-memory-cards-empty/
+    issues.md`` 2026-06-16 entry for the live QA evidence and the matching
+    CMS symptom (empty memory cards).
+    """
+    service = _make_admin_service()
+
+    class _GetAllEmptyMemory(_FakeMemory):
+        def get_all(self, *, user_id=None, agent_id=None, run_id=None):
+            return []
+
+    memory = _GetAllEmptyMemory()
+    service._postgres_fallback_query = MagicMock(
+        return_value=[
+            (
+                "pg-row-data-1",
+                {
+                    "data": "remember this from the payload data field",
+                    "type": "note",
+                    "anchor": {"created_at": "2026-06-01T12:00:00Z"},
+                    "created_at": "2026-06-01T12:00:00Z",
+                    "user_id": "user-1",
+                },
+            ),
+        ]
+    )
+
+    page = service.list_memories(memory, page=1, page_size=20)
+
+    assert page["total_items"] == 1
+    assert page["total_pages"] == 1
+    item = page["items"][0]
+    assert item["memory_id"] == "pg-row-data-1"
+    # The regression: the content must come from the top-level "data"
+    # field on the fallback row, not be empty because none of the
+    # canonical "memory" / "content" / "messages" fields are populated.
+    assert item["content"] == "remember this from the payload data field"
+    assert item["scope"] == "user"
+    assert item["scope_id"] == "user-1"
+    assert item["freshness"].created_at == "2026-06-01T12:00:00Z"
+
+
+def test_admin_service_fallback_row_synthesizes_memory_id_and_metadata():
+    """Regression: a fallback row whose top-level payload carries
+    ``type``, ``anchor``, ``created_at``, and ``decay_half_life_days``
+    (and **no** nested ``metadata`` key) must surface a non-empty
+    ``memory_id`` and a synthesized ``metadata`` dict so the list UI
+    can render type/anchor/half-life for these rows.
+
+    Background
+    ----------
+    The PostgreSQL fallback rows produced by ``SELECT id, payload FROM
+    {table}`` carry the actual memory attributes as **top-level**
+    payload fields (``type``, ``anchor``, ``created_at``,
+    ``decay_half_life_days``, ``user_id``) and lack a nested
+    ``metadata`` dict.  Live evidence (see
+    ``.omo/notepads/cms-memory-cards-empty/issues.md`` 2026-06-16):
+    ``has_data=2044, has_memory=0, has_metadata=0, has_id=0`` — every
+    fallback row in production has zero of the canonical
+    ``memory``/``content``/``messages`` fields and zero rows have a
+    ``metadata`` key.
+
+    Contract (Task 2 follow-up)
+    ----------------------------
+    The admin list must return, for each fallback row:
+
+    * ``memory_id`` — the SQL row UUID (already locked by
+      :func:`test_admin_service_list_memories_uses_postgres_row_uuid_when_payload_lacks_id`).
+      Re-locked here so a refactor cannot silently drop the
+      row-id-as-``memory_id`` step.
+    * ``metadata`` — a dict (never ``None``) containing at least
+      ``type``, ``anchor``, ``created_at``, and ``decay_half_life_days``
+      synthesised from the top-level payload fields.  The current list
+      UI reads ``metadata.type`` and ``metadata.anchor`` to render the
+      type pill and anchor context, and ``metadata.decay_half_life_days``
+      to apply the plugin-authority decay formula.
+    * ``freshness.created_at`` — the row's ``created_at`` so the CMS
+      can compute the recency display value.
+
+    Contrast with :func:`test_admin_service_extract_content_fallback_for_top_level_data`
+    ------------------------------------------------------------------------------------
+    The earlier regression locks the **content** path: ``_extract_content``
+    must read ``payload.data``.  This test locks the **identity and
+    metadata** path: the fallback loader must surface
+    ``type``/``anchor``/``decay_half_life_days`` from the top-level
+    payload, and the SQL row UUID must become ``memory_id``.  The two
+    regressions fail independently — fixing one does not satisfy the
+    other — so each is locked at the service layer to prevent silent
+    regressions during the production normalisation work.
+
+    Failure mode (red state)
+    ------------------------
+    Today, ``_load_postgres_fallback_records`` only synthesises a
+    ``metadata`` dict when the payload's ``anchor.created_at`` is set,
+    and even then it stores **only** ``created_at`` (not ``type``,
+    ``anchor``, or ``decay_half_life_days``).  The test therefore fails
+    on the first ``metadata[key]`` assertion that the current code
+    cannot satisfy.
+    """
+    service = _make_admin_service()
+
+    class _GetAllEmptyMemory(_FakeMemory):
+        def get_all(self, *, user_id=None, agent_id=None, run_id=None):
+            return []
+
+    memory = _GetAllEmptyMemory()
+    fallback_anchor = {"created_at": "2026-06-01T12:00:00Z"}
+    fallback_type = "note"
+    fallback_decay_half_life_days = 30
+    fallback_created_at = "2026-06-01T12:00:00Z"
+    service._postgres_fallback_query = MagicMock(
+        return_value=[
+            (
+                "pg-row-meta-1",
+                {
+                    "data": "remember this from the payload data field",
+                    "type": fallback_type,
+                    "anchor": fallback_anchor,
+                    "created_at": fallback_created_at,
+                    "decay_half_life_days": fallback_decay_half_life_days,
+                    "user_id": "user-1",
+                },
+            ),
+        ]
+    )
+
+    page = service.list_memories(memory, page=1, page_size=20)
+
+    assert page["total_items"] == 1
+    assert page["total_pages"] == 1
+    item = page["items"][0]
+
+    # The SQL row UUID must surface as memory_id when the payload
+    # carries no ``id`` field.  This is the identity contract the CMS
+    # relies on for per-row actions (visit, copy, edit, delete).
+    assert item["memory_id"] == "pg-row-meta-1"
+    assert item["memory_id"], "memory_id must be non-empty for fallback rows"
+
+    # The list UI must never receive ``metadata=None`` for a fallback
+    # row — the type pill and anchor context both read from this dict.
+    # A None here is exactly the failure mode that renders empty
+    # memory cards in the CMS.
+    assert isinstance(item["metadata"], dict), (
+        "fallback rows must surface a synthesized metadata dict, "
+        "not None"
+    )
+
+    # The synthesized metadata must contain the type the CMS renders
+    # in the type pill.  Top-level ``type`` on the payload is the only
+    # source for fallback rows.
+    assert item["metadata"].get("type") == fallback_type, (
+        "metadata.type must be synthesized from the top-level payload "
+        "type so the CMS type pill can render for fallback rows"
+    )
+
+    # The synthesized metadata must contain the anchor object the CMS
+    # uses for anchor context (timestamp, source reference, etc.).
+    assert item["metadata"].get("anchor") == fallback_anchor, (
+        "metadata.anchor must be synthesized from the top-level "
+        "payload anchor object"
+    )
+
+    # The freshness block must reflect the row's created_at so the CMS
+    # can compute the recency display value.  This is the only field
+    # the current production code happens to surface correctly (it
+    # reads it from the anchor-synthesized metadata); we lock it
+    # explicitly so a future refactor cannot drop the wiring.
+    assert item["freshness"].created_at == fallback_created_at, (
+        "freshness.created_at must be the payload's top-level "
+        "created_at so the CMS can render the recency display"
+    )
+
+    # The synthesized metadata must surface decay_half_life_days so
+    # the CMS can apply the plugin-authority decay formula without
+    # having to fall back to deriveHalfLifeDays(type) for every
+    # fallback row.
+    assert item["metadata"].get("decay_half_life_days") == (
+        fallback_decay_half_life_days
+    ), (
+        "metadata.decay_half_life_days must be synthesized from the "
+        "top-level payload decay_half_life_days"
+    )
+
+
 def test_admin_service_index_overview_returns_contract_shape():
     service = _make_admin_service()
     indexing_service = MagicMock()

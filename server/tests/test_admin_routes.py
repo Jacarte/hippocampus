@@ -1209,3 +1209,94 @@ def test_admin_get_unknown_memory_returns_400(monkeypatch: MonkeyPatch) -> None:
         client.post("/configure", json=_MINIMAL_CONFIG)
         response = client.get("/admin/memories/non-existent")
     assert response.status_code == 400
+
+
+# -----------------------------------------------------------------------
+# Unscoped list with empty get_all() -> PostgreSQL fallback normalization
+# -----------------------------------------------------------------------
+
+
+def test_admin_memories_list_fallback_returns_card_ready_items(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Regression: GET /admin/memories must surface card-ready items for
+    PostgreSQL fallback rows when the in-memory ``get_all()`` is empty.
+
+    The unscoped list path (``scope`` / ``scope_id`` omitted) first asks
+    mem0 for every memory.  When that call returns ``[]`` the route must
+    fall back to the PostgreSQL ``_postgres_fallback_query`` and feed the
+    rows through :meth:`AdminService._load_postgres_fallback_records`,
+    which normalises ``payload.data`` -> ``payload.memory``, synthesises
+    ``metadata`` from the top-level payload fields, and re-injects the
+    stashed anchor after :class:`AnchorService` normalisation.
+
+    This test proves the **route** (not just the service) keeps the HTTP
+    envelope aligned with the normalization contract: ``total_items`` is
+    non-zero, the first item carries a non-empty ``content`` and a
+    non-empty ``memory_id``.  Locks the contract at the wire layer so a
+    future refactor that bypasses the fallback path cannot silently
+    regress the unscoped list.
+
+    Args:
+        monkeypatch: Pytest fixture used to isolate environment variables
+            (``MEM0_VISIT_DB_PATH`` / ``OPENAI_API_KEY``) per test.
+    """
+    monkeypatch.setenv("MEM0_VISIT_DB_PATH", ":memory:")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    class _GetAllEmptyMemory(_FakeMemory):
+        """Memory double whose ``get_all()`` always returns an empty list.
+
+        Forces the unscoped list path into the PostgreSQL fallback branch
+        regardless of any records the test might add to ``self.records``.
+        """
+
+        def get_all(
+            self, *, user_id: str | None = None, agent_id: str | None = None,
+            run_id: str | None = None,
+        ) -> list[dict[str, Any]]:
+            return []
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    app = server.create_app(
+        memory_factory=_GetAllEmptyMemory, startup_enabled=False
+    )
+
+    fallback_row: tuple[str, dict[str, Any]] = (
+        "pg-rt-1",
+        {
+            "data": "route test content",
+            "type": "note",
+            "user_id": "user-1",
+            "anchor": {"created_at": "2026-01-01T00:00:00Z"},
+            "created_at": "2026-01-01T00:00:00Z",
+        },
+    )
+    app.state.admin_service._postgres_fallback_query = MagicMock(
+        return_value=[fallback_row]
+    )
+
+    with TestClient(app) as client:
+        client.post("/configure", json=_MINIMAL_CONFIG)
+
+        response = client.get(
+            "/admin/memories",
+            params={"page": 1, "page_size": 20},
+        )
+
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["total_items"] > 0
+    assert len(payload["items"]) == payload["total_items"]
+
+    first_item = payload["items"][0]
+    assert first_item["content"] != ""
+    assert first_item["content"] == "route test content"
+    assert first_item["memory_id"] != ""
+    assert first_item["memory_id"] == "pg-rt-1"
+    assert first_item["scope"] == "user"
+    assert first_item["scope_id"] == "user-1"
+    assert isinstance(first_item["metadata"], dict)

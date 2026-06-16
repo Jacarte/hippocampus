@@ -21,7 +21,13 @@ The Vite dev server starts at `http://localhost:5173` and proxies these paths to
 - `/memories`, `/search`, `/retrieve`, `/query` — read-only memory and retrieval endpoints
 - `/index` — indexing status
 
-Set `VITE_BACKEND_PROXY_TARGET` to point the proxy at a different backend origin.
+Set `VITE_BACKEND_PROXY_TARGET` to point the proxy at a different backend origin. For example, to reproduce a bug against the remote backend while keeping the CMS on localhost:
+
+```bash
+VITE_BACKEND_PROXY_TARGET=http://192.168.0.160:18000 bun run dev
+```
+
+Vite forwards every proxied path (`/admin`, `/health`, etc.) to the target origin. The browser still talks to `http://localhost:5173`, so all requests remain same-origin. No CORS headers, preflight, or cookie-domain changes are needed.
 
 ### Production build and preview
 

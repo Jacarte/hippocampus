@@ -866,6 +866,13 @@ class AdminService:
         items = self._anchor_service.normalize_payload(raw_records) or []
         if not isinstance(items, list):
             items = list(items) if items else []
+        # ``AnchorService.normalize_payload`` normalises (and may clear)
+        # the ``anchor`` field on each record.  Fallback rows store
+        # anchors as ``{"created_at": "..."}`` only, so the normalize
+        # step would wipe the synthesised anchor.  Re-inject the
+        # stashed top-level anchor for fallback records and strip the
+        # private marker before the records reach the list extractor.
+        self._restore_fallback_anchors(items)
 
         if normalized_query:
             needle = normalized_query.casefold()
@@ -1224,6 +1231,67 @@ class AdminService:
         }
 
     def _load_postgres_fallback_records(self) -> list[dict[str, Any]]:
+        """Load fallback records from the PostgreSQL ``mem0_memories`` table.
+
+        The SQL fallback query (``SELECT id, payload FROM {table}``) returns
+        rows that the canonical mem0 ``memory.get_all(...)`` path missed
+        (e.g. when the in-memory store is empty but rows exist in the
+        backing PostgreSQL table).  Live evidence (see
+        ``.omo/notepads/cms-memory-cards-empty/issues.md`` 2026-06-16)
+        shows these rows carry the actual memory attributes as
+        **top-level** payload fields (``data``, ``type``, ``anchor``,
+        ``created_at``, ``decay_half_life_days``, ``user_id``) and
+        typically lack both the canonical ``memory``/``content``/
+        ``messages`` content fields and a nested ``metadata`` dict.
+
+        To keep the rest of the admin pipeline (content extraction,
+        freshness, type/anchor rendering) working against the same shapes
+        it sees for scoped-path records, this loader normalises the
+        fallback row into the canonical shape **before** the record
+        reaches :class:`AnchorService` or the list/detail extractors:
+
+        * The SQL row UUID is stamped as ``record["id"]`` whenever the
+          payload itself does not carry an ``id`` field.  This is the
+          identity contract the CMS relies on for per-row actions
+          (visit, copy, edit, delete) — locked by
+          ``test_admin_service_list_memories_uses_postgres_row_uuid_when_payload_lacks_id``.
+        * A non-empty top-level ``payload["data"]`` string is copied to
+          ``payload["memory"]`` so the existing
+          :meth:`AdminService._extract_content` branch picks it up.
+          This is the only way to surface fallback rows through the
+          canonical content extractor without coupling the extractor
+          to the ``data`` field — keeps the extractor shape simple and
+          centralises the data-shape adaptation in the loader.  Only
+          runs when no canonical content field is already populated, so
+          scoped-path records (which never go through this loader) and
+          fallback rows that already carry ``memory`` are not mutated.
+        * A ``record["metadata"]`` dict is synthesised from the
+          top-level payload fields ``type``, ``anchor``,
+          ``decay_half_life_days``, and ``created_at`` (with
+          ``anchor.created_at`` as a secondary source for ``created_at``
+          when the top-level field is absent).  When the payload already
+          carries a nested ``metadata`` dict, the synthesised fields are
+          merged in (never overwriting existing keys), so callers that
+          pass richer metadata downstream are preserved.
+        * The original top-level ``anchor`` is preserved on the record
+          under the private marker ``_admin_fallback_anchor`` so the
+          post-normalize step in
+          :meth:`AdminService.list_memories` can re-inject it into
+          ``record["metadata"]["anchor"]`` after
+          :class:`AnchorService` strips/validates it.  The marker is
+          removed once the re-injection is done; it never reaches the
+          response payload.
+
+        The normalisations are fallback-only: scoped-path records
+        returned by ``memory.get_all(...)`` are never routed through
+        this function, so the canonical content/metadata shapes are
+        left untouched on the main list path.
+
+        Returns:
+            A list of dict-shaped records ready to be fed to
+            :meth:`AnchorService.normalize_payload`.  Empty when the
+            fallback query returns no rows.
+        """
         rows = self._postgres_fallback_query("SELECT id, payload FROM {table}")
         records: list[dict[str, Any]] = []
         for row in rows or []:
@@ -1240,18 +1308,180 @@ class AdminService:
             record = dict(payload)
             if isinstance(row_id, str) and row_id and not self._extract_memory_id(record):
                 record["id"] = row_id
+            self._promote_fallback_data_to_memory(record)
+            original_anchor = record.get("anchor")
+            record["metadata"] = self._synthesize_fallback_metadata(record)
+            if isinstance(original_anchor, dict) and original_anchor:
+                record["_admin_fallback_anchor"] = original_anchor
+            records.append(record)
+        return records
+
+    @staticmethod
+    def _restore_fallback_anchors(items: list[Any]) -> list[Any]:
+        """Re-inject fallback anchors into ``record["metadata"]["anchor"]``.
+
+        :class:`AnchorService` normalises the ``anchor`` field on each
+        memory record and, in non-strict mode, replaces
+        ``metadata["anchor"]`` with ``None`` whenever the anchor dict
+        does not carry a ``type`` key.  The live PostgreSQL fallback
+        rows store anchors as ``{"created_at": "..."}`` only (no
+        ``type``), so the normalize step would wipe the synthesised
+        anchor from :meth:`_load_postgres_fallback_records` for every
+        fallback row.
+
+        To keep the loader's synthesised metadata intact for the
+        downstream list/detail extractors, this helper walks the
+        record list and, for every record carrying the private marker
+        ``_admin_fallback_anchor``, copies the original anchor into
+        ``record["metadata"]["anchor"]`` and removes the marker.  The
+        marker is only set by
+        :meth:`_load_postgres_fallback_records`, so scoped-path
+        records are never touched.
+
+        Called from :meth:`AdminService.list_memories` immediately
+        after :meth:`AnchorService.normalize_payload` returns.  Must
+        run after normalize (so the clobber has already happened) and
+        before the records reach :meth:`_assemble_list_item` (so the
+        list extractor sees the restored anchor).
+
+        Args:
+            items: A list of records returned by
+                :meth:`AnchorService.normalize_payload`.  May contain
+                ``None`` entries and non-dict values, which are passed
+                through unchanged.
+
+        Returns:
+            The same list, with fallback anchors restored and the
+            private marker removed.  Returned for chaining
+            convenience; the input list is mutated in place.
+        """
+        for record in items or []:
+            if not isinstance(record, dict):
+                continue
+            stashed = record.pop("_admin_fallback_anchor", None)
+            if not isinstance(stashed, dict) or not stashed:
+                continue
             metadata = record.get("metadata")
-            created_at = _extract_created_at(metadata) if isinstance(metadata, dict) else None
-            if not created_at:
+            if not isinstance(metadata, dict):
+                metadata = {}
+                record["metadata"] = metadata
+            metadata["anchor"] = stashed
+        return items
+
+    @staticmethod
+    def _promote_fallback_data_to_memory(record: dict[str, Any]) -> None:
+        """Copy ``payload.data`` into ``payload.memory`` for fallback rows.
+
+        The PostgreSQL ``mem0_memories.payload`` rows surfaced by the
+        fallback query carry the memory text in a top-level ``"data"``
+        field rather than the canonical ``"memory"`` / ``"content"`` /
+        ``"messages"`` fields.  Mutating the record in place to populate
+        ``record["memory"]`` lets the existing
+        :meth:`AdminService._extract_content` branch read the text
+        without coupling the extractor to the fallback shape.
+
+        Only fires when the top-level ``data`` field is a non-empty
+        string and no canonical content field is already populated, so
+        fallback rows that already carry ``memory`` (or ``content`` /
+        ``messages``) are not overwritten.  This keeps the function
+        safe to call against any dict-shaped record — scoped-path
+        records that happen to pass through this loader will not be
+        mutated because they do not have a top-level ``"data"`` field.
+
+        Args:
+            record: A dict-shaped record loaded from the PostgreSQL
+                fallback query.  Mutated in place; ``record["memory"]``
+                is set when the promotion runs.
+        """
+        payload_data = record.get("data")
+        if not (isinstance(payload_data, str) and payload_data):
+            return
+        existing_memory = record.get("memory")
+        if isinstance(existing_memory, str) and existing_memory:
+            return
+        record["memory"] = payload_data
+
+    @staticmethod
+    def _synthesize_fallback_metadata(record: dict[str, Any]) -> dict[str, Any]:
+        """Return a metadata dict lifted from the payload's top-level fields.
+
+        The fallback query returns rows that store their canonical
+        attributes (``type``, ``anchor``, ``decay_half_life_days``,
+        ``created_at``) at the **top level** of ``payload`` rather than
+        under a nested ``"metadata"`` key.  The list and detail
+        extractors (``_safe_metadata``, ``_freshness_payload``,
+        ``_extract_decay_half_life_days``, etc.) all read from
+        ``record["metadata"]``, so this helper builds that dict from the
+        top-level fields when the payload does not already carry one.
+
+        Merge policy:
+
+        * If ``record["metadata"]`` is already a dict, start from a copy
+          of it and only fill in keys that are missing or invalid for
+          the target type.  Canonical payload metadata wins; top-level
+          fields are a **secondary** source.
+        * If the payload has no ``metadata`` key (the common fallback
+          case), the synthesised dict is returned.
+        * The synthesised dict is returned even when no fields are
+          liftable, so callers that unconditionally read
+          ``record["metadata"]`` still see a dict rather than ``None``.
+
+        Field lifting rules:
+
+        * ``type`` — copied when the top-level field is a non-empty
+          string and the existing metadata has no string ``type``.
+        * ``anchor`` — copied when the top-level field is a dict and
+          the existing metadata has no dict ``anchor``.
+        * ``decay_half_life_days`` — copied when the top-level field is
+          a positive int (bool is rejected, matching
+          :func:`_extract_decay_half_life_days`).
+        * ``created_at`` — copied from the top-level ``created_at``
+          string when present, otherwise from
+          ``anchor["created_at"]`` as a secondary source.
+
+        Args:
+            record: A dict-shaped record loaded from the PostgreSQL
+                fallback query.  Not mutated; the synthesised dict is
+                returned as a fresh copy.
+
+        Returns:
+            A dict containing the lifted metadata fields, plus any
+            fields the payload already carried under ``metadata``.  An
+            empty dict is returned when the payload exposes no
+            liftable fields and no nested metadata.
+        """
+        existing_metadata = record.get("metadata")
+        metadata: dict[str, Any] = (
+            dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
+        )
+        if not isinstance(metadata.get("type"), str):
+            payload_type = record.get("type")
+            if isinstance(payload_type, str) and payload_type:
+                metadata["type"] = payload_type
+        if not isinstance(metadata.get("anchor"), dict):
+            payload_anchor = record.get("anchor")
+            if isinstance(payload_anchor, dict) and payload_anchor:
+                metadata["anchor"] = payload_anchor
+        current_half_life = metadata.get("decay_half_life_days")
+        if isinstance(current_half_life, bool) or not isinstance(current_half_life, int):
+            payload_half_life = record.get("decay_half_life_days")
+            if (
+                isinstance(payload_half_life, int)
+                and not isinstance(payload_half_life, bool)
+                and payload_half_life >= 1
+            ):
+                metadata["decay_half_life_days"] = payload_half_life
+        if not isinstance(metadata.get("created_at"), str):
+            created_at = record.get("created_at")
+            if not (isinstance(created_at, str) and created_at):
                 anchor = record.get("anchor")
                 if isinstance(anchor, dict):
                     anchor_created_at = anchor.get("created_at")
                     if isinstance(anchor_created_at, str) and anchor_created_at:
-                        updated_metadata = dict(metadata) if isinstance(metadata, dict) else {}
-                        updated_metadata["created_at"] = anchor_created_at
-                        record["metadata"] = updated_metadata
-            records.append(record)
-        return records
+                        created_at = anchor_created_at
+            if isinstance(created_at, str) and created_at:
+                metadata["created_at"] = created_at
+        return metadata
 
     def _assemble_detail_item(self, record: dict[str, Any]) -> dict[str, Any]:
         """Build a detail-item payload from a raw memory record.
