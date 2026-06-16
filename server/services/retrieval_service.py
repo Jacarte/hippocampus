@@ -22,6 +22,13 @@ from .metrics import (
 class RetrievalService:
     _RETRIEVE_CONTROL_FILTER_KEYS: frozenset[str] = frozenset({"include_cold_context"})
 
+    # mem0 2.0.0 identifier keys that must live INSIDE the ``filters`` dict —
+    # passing them as top-level ``get_all``/``search`` kwargs raises ValueError
+    # via ``_reject_top_level_entity_params`` in mem0.memory.main.
+    _MEM0_ENTITY_ID_KEYS: frozenset[str] = frozenset(
+        {"user_id", "agent_id", "run_id"}
+    )
+
     def __init__(
         self,
         *,
@@ -38,6 +45,137 @@ class RetrievalService:
         self._default_result_limit = default_result_limit
         self._reciprocal_rank_k = reciprocal_rank_k
         self._reranker = reranker or HeuristicReranker()
+
+    @staticmethod
+    def _split_identifier_filters(
+        params: dict[str, Any] | None,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """Split a flat parameter dict into ``(identifier_filters, extra_filters)``.
+
+        mem0 2.0.0 requires ``user_id``/``agent_id``/``run_id`` to live INSIDE the
+        ``filters`` dict passed to ``get_all``/``search``; it rejects them as
+        top-level kwargs.  This helper separates those entity-id keys from any
+        caller-supplied metadata ``filters`` so we can re-merge them inside a
+        single ``filters`` kwarg at the mem0 call site.
+
+        Args:
+            params: A flat dict that may contain any mix of entity-id keys
+                (``user_id``/``agent_id``/``run_id``) and a ``filters`` key whose
+                value is itself a dict of metadata filters.  ``None`` is treated
+                as an empty dict.
+
+        Returns:
+            A 2-tuple ``(identifier_filters, extra_filters)`` where
+            ``identifier_filters`` contains only the three entity-id keys with
+            non-``None`` values, and ``extra_filters`` is the original metadata
+            ``filters`` payload (or ``None`` when absent).
+        """
+        source = dict(params or {})
+        extra_filters = source.pop("filters", None)
+        identifier_filters = {
+            key: value
+            for key, value in source.items()
+            if key in RetrievalService._MEM0_ENTITY_ID_KEYS and value is not None
+        }
+        return identifier_filters, extra_filters
+
+    @classmethod
+    def build_mem0_get_all_kwargs(
+        cls,
+        *,
+        identifier_params: dict[str, Any] | None,
+        top_k: int = 20,
+    ) -> dict[str, Any]:
+        """Build the explicit ``get_all`` kwargs for mem0 2.0.0.
+
+        The verified mem0 2.0.0 signature is
+        ``get_all(self, *, filters: Optional[Dict[str, Any]] = None, top_k: int = 20, **kwargs)``
+        and it rejects top-level ``user_id``/``agent_id``/``run_id`` as
+        top-level kwargs.  This helper centralises the translation from the
+        server's flat identifier inputs into the documented 2.0.0 shape so
+        callers don't have to remember the rule.
+
+        Args:
+            identifier_params: A flat dict of entity-id values
+                (``user_id``/``agent_id``/``run_id``) — typically produced by
+                :meth:`_identifier_params` or the equivalent on
+                :class:`MemoryService`.  Extra keys (e.g. a stray ``filters``)
+                are tolerated and ignored.
+            top_k: Maximum number of memories to return.  Defaults to the
+                mem0 2.0.0 default (``20``) so behaviour matches what callers
+                saw with the old 1.0.3 implicit defaults.
+
+        Returns:
+            A kwargs dict containing ``filters`` (the merged entity-id dict;
+            an empty dict when no identifier was supplied so the mem0
+            ``ValueError`` for "filters must contain at least one of user_id,
+            agent_id, run_id" is surfaced by the SDK rather than masked) and
+            ``top_k``.  Always explicit — never relies on mem0 defaulting.
+        """
+        identifier_filters, _ = cls._split_identifier_filters(identifier_params)
+        return {
+            "filters": dict(identifier_filters),
+            "top_k": top_k,
+        }
+
+    @classmethod
+    def build_mem0_search_kwargs(
+        cls,
+        *,
+        identifier_params: dict[str, Any] | None,
+        filters: dict[str, Any] | None = None,
+        top_k: int = 20,
+        threshold: float = 0.1,
+        rerank: bool = False,
+    ) -> dict[str, Any]:
+        """Build the explicit ``search`` kwargs for mem0 2.0.0.
+
+        The verified mem0 2.0.0 signature is
+        ``search(self, query: str, *, top_k: int = 20, filters: Optional[Dict[str, Any]] = None, threshold: float = 0.1, rerank: bool = False, **kwargs)``
+        and it rejects top-level ``user_id``/``agent_id``/``run_id``.  This
+        helper merges the server's identifier inputs with any caller-supplied
+        metadata ``filters`` and forwards them inside a single ``filters`` kwarg
+        alongside the explicit ``top_k``/``threshold``/``rerank`` defaults.
+
+        Args:
+            identifier_params: A flat dict of entity-id values
+                (``user_id``/``agent_id``/``run_id``) — typically produced by
+                :meth:`_identifier_params` or the equivalent on
+                :class:`MemoryService`.  A stray ``filters`` key inside this
+                dict is ignored (use the ``filters`` parameter for metadata
+                filters instead).
+            filters: Caller-supplied metadata filters (preserved untouched
+                except that entity-id keys are stripped so we never pass
+                them at the top level).
+            top_k: Maximum number of results to return.  Defaults to the
+                mem0 2.0.0 default (``20``).
+            threshold: Minimum similarity score.  Defaults to the mem0 2.0.0
+                default (``0.1``).
+            rerank: Whether to apply the configured mem0 reranker.  Defaults
+                to the mem0 2.0.0 default (``False``) so the backend
+                continues to own reranking for ``/retrieve`` and stays
+                out of the ``/search`` path.
+
+        Returns:
+            A kwargs dict containing ``top_k``, ``filters`` (entity ids merged
+            with caller-supplied metadata filters), ``threshold``, and
+            ``rerank``.  All four are always explicit — never relies on
+            mem0 defaulting.
+        """
+        identifier_filters, _ = cls._split_identifier_filters(identifier_params)
+        sanitized_extra_filters = {
+            key: value
+            for key, value in (filters or {}).items()
+            if key not in cls._MEM0_ENTITY_ID_KEYS
+        }
+        merged_filters: dict[str, Any] = dict(identifier_filters)
+        merged_filters.update(sanitized_extra_filters)
+        return {
+            "top_k": top_k,
+            "filters": merged_filters,
+            "threshold": threshold,
+            "rerank": rerank,
+        }
 
     def search(
         self,
@@ -56,14 +194,22 @@ class RetrievalService:
             agent_id=agent_id,
             filters=filters,
         )
-        if limit is not None:
-            params["limit"] = limit
+        identifier_params, search_metadata_filters = self._split_identifier_filters(
+            params
+        )
+        # ``top_k`` is the mem0 2.0.0 rename of the legacy ``limit`` kwarg; keep
+        # the existing default of 20 (the verified mem0 2.0.0 default) when the
+        # caller did not pin a value, so behaviour matches what callers saw
+        # with mem0 1.0.3.
+        semantic_top_k = limit if limit is not None else 20
         with stage_timer() as total_elapsed_ms:
             semantic_response, semantic_latency_ms, semantic_degraded = (
                 self._semantic_search(
                     memory_instance,
                     query=query,
-                    params=params,
+                    identifier_params=identifier_params,
+                    filters=search_metadata_filters,
+                    top_k=semantic_top_k,
                 )
             )
             lexical_count, lexical_latency_ms, lexical_degraded = (
@@ -179,12 +325,6 @@ class RetrievalService:
         )
         retrieval_filters = self._strip_retrieve_control_filters(filters)
         combined_filters = self._combine_filters(retrieval_filters, requested_scopes)
-        semantic_params = self._search_params(
-            user_id=user_id,
-            run_id=run_id,
-            agent_id=agent_id,
-            filters=retrieval_filters,
-        )
 
         with stage_timer() as total_elapsed_ms:
             lexical_results, lexical_latency_ms, lexical_reason = (
@@ -199,7 +339,7 @@ class RetrievalService:
                 self._safe_semantic_results(
                     memory_instance,
                     query=query,
-                    params=semantic_params,
+                    identifier_params=identifier_params,
                     filters=combined_filters,
                 )
             )
@@ -344,7 +484,13 @@ class RetrievalService:
         identifier_params: dict[str, Any],
         filters: dict[str, Any] | None,
     ) -> list[dict[str, Any]]:
-        records = self._coerce_records(memory_instance.get_all(**identifier_params))
+        records = self._coerce_records(
+            memory_instance.get_all(
+                **self.build_mem0_get_all_kwargs(
+                    identifier_params=identifier_params
+                )
+            )
+        )
         if filters is not None:
             records = [
                 record for record in records if self._matches_filters(record, filters)
@@ -425,8 +571,14 @@ class RetrievalService:
         )
         if isinstance(annotated_response, dict):
             response_payload = dict(annotated_response)
-            response_payload.setdefault("query", query)
-            response_payload.setdefault("params", params)
+            # Always surface the *server's* caller-side ``params`` view in the
+            # response.  The mem0 2.0.0 backend returns ``{"results": [...]}``
+            # without a ``params`` field, but legacy test fakes (and any
+            # future backend that happens to echo ``params``) must not be
+            # allowed to leak 2.0.0 kwargs (e.g. ``top_k``/``threshold``/
+            # ``rerank``) into the public response payload.
+            response_payload["query"] = query
+            response_payload["params"] = params
             response_payload["trace"] = {
                 "request_id": current_request_id(),
                 "retrieval": diagnostics,
@@ -453,11 +605,45 @@ class RetrievalService:
         memory_instance: Any,
         *,
         query: str,
-        params: dict[str, Any],
+        identifier_params: dict[str, Any],
+        filters: dict[str, Any] | None,
+        top_k: int = 20,
     ) -> tuple[Any, float, bool]:
+        """Run a single semantic ``memory_instance.search`` call.
+
+        Translates the server-side ``identifier_params`` + metadata
+        ``filters`` into the explicit mem0 2.0.0 kwargs (see
+        :meth:`build_mem0_search_kwargs`) so the SDK's
+        ``_reject_top_level_entity_params`` guard does not raise on
+        top-level ``user_id``/``agent_id``/``run_id``.
+
+        Args:
+            memory_instance: The mem0 ``Memory`` instance returned by
+                :func:`server.services.runtime.initialize_memory`.
+            query: Natural-language query forwarded to ``memory.search``.
+            identifier_params: Entity-id dict (``user_id``/``agent_id``/
+                ``run_id``) merged into the ``filters`` kwarg of the
+                mem0 call.
+            filters: Caller-supplied metadata filters; entity-id keys are
+                stripped so the mem0 2.0.0 top-level-entity guard does
+                not fire.
+            top_k: Maximum number of results.  Defaults to the mem0 2.0.0
+                default (``20``).
+
+        Returns:
+            A 3-tuple ``(response, semantic_elapsed_ms, semantic_degraded)``
+            where ``semantic_degraded`` is always ``False`` on success
+            (exceptions are propagated to the caller and recorded via
+            :func:`trace_backend_error`).
+        """
+        mem0_kwargs = self.build_mem0_search_kwargs(
+            identifier_params=identifier_params,
+            filters=filters,
+            top_k=top_k,
+        )
         with stage_timer() as semantic_elapsed_ms:
             try:
-                response = memory_instance.search(query=query, **params)
+                response = memory_instance.search(query=query, **mem0_kwargs)
                 return response, semantic_elapsed_ms(), False
             except Exception as exc:
                 trace_backend_error("retrieval.semantic_stage", exc)
@@ -715,12 +901,39 @@ class RetrievalService:
         memory_instance: Any,
         *,
         query: str,
-        params: dict[str, Any],
+        identifier_params: dict[str, Any],
         filters: dict[str, Any] | None,
     ) -> tuple[list[dict[str, Any]], float, str | None]:
+        """Run semantic search and return annotated candidates, swallowing failures.
+
+        Mirrors :meth:`_semantic_search` but never raises; on failure it
+        returns an empty result list plus the ``"semantic_unavailable"``
+        reason so the caller can degrade gracefully.  The mem0 2.0.0 call
+        shape is built via :meth:`build_mem0_search_kwargs` for the same
+        reasons described on :meth:`_semantic_search`.
+
+        Args:
+            memory_instance: The mem0 ``Memory`` instance.
+            query: Natural-language query forwarded to ``memory.search``.
+            identifier_params: Entity-id dict (``user_id``/``agent_id``/
+                ``run_id``) merged into the ``filters`` kwarg of the
+                mem0 call.
+            filters: Caller-supplied metadata filters; entity-id keys are
+                stripped so the mem0 2.0.0 top-level-entity guard does
+                not fire.
+
+        Returns:
+            A 3-tuple ``(semantic_results, semantic_elapsed_ms, reason)``
+            where ``reason`` is ``None`` on success and
+            ``"semantic_unavailable"`` when the underlying search raised.
+        """
+        mem0_kwargs = self.build_mem0_search_kwargs(
+            identifier_params=identifier_params,
+            filters=filters,
+        )
         with stage_timer() as semantic_elapsed_ms:
             try:
-                response = memory_instance.search(query=query, **params)
+                response = memory_instance.search(query=query, **mem0_kwargs)
             except Exception as exc:
                 trace_backend_error("retrieval.semantic_stage", exc)
                 return [], semantic_elapsed_ms(), "semantic_unavailable"

@@ -22,6 +22,27 @@ _SENSITIVE_CONFIG_KEYS = {
 
 
 def get_config_from_env() -> dict[str, Any]:
+    """Build the mem0 ``MemoryConfig``-compatible dict from environment variables.
+
+    Returns
+    -------
+    dict[str, Any]
+        Keys understood by :func:`Memory.from_config`:
+
+        * ``version`` — config schema version (default ``"v1.1"``).
+        * ``vector_store`` — ``{"provider": ..., "config": {...}}``.
+          When *provider* is ``"pgvector"`` the config block includes
+          ``host``, ``port``, ``dbname``, ``user``, ``password``,
+          ``collection_name``, ``embedding_model_dims`` (env
+          ``MEM0_EMBEDDING_MODEL_DIMS``, default ``1536``),
+          ``diskann`` (env ``MEM0_PGVECTOR_DISKANN``, default
+          ``false``), and ``hnsw`` (env ``MEM0_PGVECTOR_HNSW``,
+          default ``false``).
+        * ``llm`` — provider + config dict with model, temperature, api_key.
+        * ``embedder`` — provider + config dict with model, api_key.
+        * ``history_db_path`` — path to the history SQLite store.
+        * ``visit_db_path`` — path to the visit telemetry SQLite store.
+    """
     config: dict[str, Any] = {"version": "v1.1"}
 
     vector_provider = os.environ.get("MEM0_VECTOR_PROVIDER", "pgvector")
@@ -34,6 +55,13 @@ def get_config_from_env() -> dict[str, Any]:
             "user": os.environ.get("POSTGRES_USER", "postgres"),
             "password": os.environ.get("POSTGRES_PASSWORD", "postgres"),
             "collection_name": os.environ.get("POSTGRES_COLLECTION", "mem0_memories"),
+            "embedding_model_dims": int(
+                os.environ.get("MEM0_EMBEDDING_MODEL_DIMS", "1536")
+            ),
+            "diskann": os.environ.get("MEM0_PGVECTOR_DISKANN", "false").lower()
+            in {"1", "true", "yes"},
+            "hnsw": os.environ.get("MEM0_PGVECTOR_HNSW", "false").lower()
+            in {"1", "true", "yes"},
         }
     config["vector_store"] = vector_store
 

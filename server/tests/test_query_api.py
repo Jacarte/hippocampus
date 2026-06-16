@@ -33,20 +33,19 @@ class FakeMemoryBackend:
         self,
         query: str,
         *,
-        user_id: str | None = None,
-        agent_id: str | None = None,
-        run_id: str | None = None,
-        limit: int = 100,
+        top_k: int = 100,
         filters: dict[str, Any] | None = None,
         threshold: float | None = None,
         rerank: bool = True,
+        **_kwargs: Any,
     ) -> dict[str, Any]:
+        # mem0 2.0.0 explicit kwargs: entity-id keys live INSIDE ``filters``,
+        # ``top_k`` replaces the legacy ``limit`` kwarg.  Record what the
+        # service actually passes so the QueryService contract tests below
+        # assert against the 2.0.0 surface.
         self.last_search_kwargs = {
             "query": query,
-            "user_id": user_id,
-            "agent_id": agent_id,
-            "run_id": run_id,
-            "limit": limit,
+            "top_k": top_k,
             "filters": filters,
             "threshold": threshold,
             "rerank": rerank,
@@ -169,7 +168,7 @@ def test_query_memory_store_works_with_real_retrieval_service() -> None:
     assert result["hits"][0]["corpus"] == "memory_store"
     assert result["hits"][0]["datetime"] == "2026-05-20T10:00:00Z"
     assert memory_backend.last_search_kwargs is not None
-    assert memory_backend.last_search_kwargs["limit"] == 10
+    assert memory_backend.last_search_kwargs["top_k"] == 10
 
 
 def test_query_memory_hit_uses_updated_at_when_available() -> None:
@@ -231,7 +230,7 @@ def test_query_memory_store_forwards_custom_limit_to_real_retrieval_service() ->
 
     assert result["hits"][0]["corpus"] == "memory_store"
     assert memory_backend.last_search_kwargs is not None
-    assert memory_backend.last_search_kwargs["limit"] == 3
+    assert memory_backend.last_search_kwargs["top_k"] == 3
 
 
 def test_query_attaches_memory_hits_ahead_of_file_hits() -> None:

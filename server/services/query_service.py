@@ -14,6 +14,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 from api_models import FileHit, MemoryHit, UnifiedQueryResponse
+from .mem0_compat import embed
 from .file_corpus_service import FileCorpusService
 from .metrics import query_duration_seconds, query_hits_count
 
@@ -67,7 +68,8 @@ class QueryService:
             query_embedding: Optional pre-computed vector embedding of
                 *query_text*.  When ``None`` and *chunk_memory_enabled* is
                 ``True``, the embedding is derived automatically from
-                *memory_instance* (``memory_instance.embedding_model.embed``).
+                *memory_instance* (routed through the ``mem0_compat``
+                compatibility seam — ``mem0_compat.embed(memory_instance, query_text)``).
                 If embedding derivation fails, a warning is logged and the
                 query falls back to lexical-only results.  Ignored when
                 *chunk_memory_enabled* is ``False``.
@@ -94,7 +96,9 @@ class QueryService:
             and memory_instance is not None
         ):
             try:
-                query_embedding = memory_instance.embedding_model.embed(query_text)
+                query_embedding = embed(
+                    memory_instance, query_text, memory_action=None
+                )
             except Exception as exc:
                 logger.warning(
                     "Failed to embed query for chunk-memory retrieval: %s", exc

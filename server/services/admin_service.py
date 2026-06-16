@@ -115,6 +115,171 @@ def _as_iso_string(value: Any) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# mem0 2.0.0 response-shape adapters
+# ---------------------------------------------------------------------------
+#
+# mem0 2.0.0 tightened the wire shape of several admin-facing methods:
+#
+# * ``get_all()`` now requires a ``filters`` dict (not top-level entity
+#   keyword args) and returns ``{"results": [...]}`` instead of a bare list.
+# * ``add()`` returns ``{"results": [...]}`` (a list of ``MemoryItem`` dicts)
+#   instead of a single flat record dict.
+# * ``update()`` returns ``{"message": "Memory updated successfully!"}`` and
+#   no longer echoes the updated record; the caller must re-fetch via
+#   ``get(memory_id)`` to read the post-update state.
+#
+# The helpers below centralise the *only* places that need to know about
+# these shape changes so the rest of the service can keep operating on the
+# pre-2.0.0 shapes it was written for.  Each helper accepts the union of
+# return shapes seen across the mem0 1.x → 2.x boundary, so the existing
+# ``_FakeMemory`` test doubles (which still emit the older flat shapes)
+# remain valid.
+
+
+def _unwrap_results(result: Any) -> list[Any]:
+    """Normalise a mem0 ``get_all`` / list-style return into a flat list.
+
+    mem0 2.0.0 wraps the result list in a ``{"results": [...]}`` dict (and
+    historically some backends used ``{"data": [...]}``); older versions and
+    several test doubles return the list directly.  This helper is the
+    single place that knows about the wrapping so the rest of the service
+    can iterate over a plain list.
+
+    Args:
+        result: The raw value returned by a mem0 list-style call.  May be
+            ``None``, a list, a dict with a ``"results"`` or ``"data"`` key
+            whose value is a list, or any other shape (returned as an empty
+            list).
+
+    Returns:
+        The inner list, or an empty list when the input is missing or has
+        an unrecognised shape.  Never raises — the caller is expected to
+        treat an empty list as "no records available".
+    """
+    if result is None:
+        return []
+    if isinstance(result, list):
+        return result
+    if isinstance(result, dict):
+        inner = result.get("results")
+        if isinstance(inner, list):
+            return inner
+        inner = result.get("data")
+        if isinstance(inner, list):
+            return inner
+    return []
+
+
+def _extract_memory_id_from_add_result(result: Any) -> str:
+    """Extract a memory id from a mem0 ``add()`` response.
+
+    mem0 2.0.0 returns ``{"results": [<memory item>, ...]}`` where each
+    item carries ``"id"`` and ``"memory"`` keys.  Older versions returned
+    the memory item directly.  This helper accepts both shapes (and
+    nested variants) and returns the first non-empty id it finds.
+
+    Args:
+        result: The raw value returned by a mem0 ``add()`` call.
+
+    Returns:
+        The extracted id string, or an empty string when no id could be
+        found.  Never raises.
+    """
+    if result is None:
+        return ""
+    if isinstance(result, dict):
+        # 2.0.0: {"results": [<item>]}
+        nested = result.get("results")
+        if isinstance(nested, list) and nested:
+            first = nested[0]
+            if isinstance(first, dict):
+                for key in ("id", "memory_id"):
+                    value = first.get(key)
+                    if isinstance(value, str) and value:
+                        return value
+        # Some backends wrap as {"memory": {...}}
+        inner = result.get("memory")
+        if isinstance(inner, dict):
+            for key in ("id", "memory_id"):
+                value = inner.get(key)
+                if isinstance(value, str) and value:
+                    return value
+        # Flat record (older mem0, test doubles).
+        for key in ("id", "memory_id"):
+            value = result.get(key)
+            if isinstance(value, str) and value:
+                return value
+    if isinstance(result, str):
+        return result
+    return ""
+
+
+def _normalize_update_response(
+    updated: Any,
+    memory_id: str,
+    memory_instance: Any,
+) -> dict[str, Any]:
+    """Normalise a mem0 ``update()`` response into a usable record dict.
+
+    mem0 2.0.0 returns ``{"message": "Memory updated successfully!"}``
+    instead of echoing the updated record.  Older versions (and the
+    in-test ``_FakeMemory.update``) returned a full record dict with
+    ``"messages"`` and ``"metadata"`` fields.  Centralising the
+    "either the response is a usable record or fall back to get()"
+    branch here means :meth:`AdminService.update_memory` only needs to
+    call the helper and trust its return value.
+
+    Args:
+        updated: The raw value returned by a mem0 ``update()`` call.
+        memory_id: Identifier of the memory being updated.  Used to
+            fall back to ``memory_instance.get(memory_id)`` when *updated*
+            is not a usable record dict.
+        memory_instance: The mem0 memory instance.  Only invoked when a
+            re-fetch is required.
+
+    Returns:
+        A normalized record dict carrying at minimum ``"id"``.  Raises
+        :class:`ValueError` when the memory cannot be located after the
+        update — i.e. the write succeeded but the post-state is
+        unreadable, which the route layer surfaces as ``400``.
+    """
+    if isinstance(updated, dict) and "messages" in updated:
+        # Pre-2.0.0 / test-double shape: the response is the full record.
+        return updated
+    # mem0 2.0.0 (and any future "ack-only" shape): re-fetch.
+    fetched = memory_instance.get(memory_id)
+    if fetched is None:
+        raise ValueError(f"memory {memory_id!r} not found after update")
+    if not isinstance(fetched, dict):
+        raise ValueError(
+            f"memory {memory_id!r} returned an unexpected post-update shape"
+        )
+    return fetched
+
+
+def _build_get_all_filters(scope: str, scope_id: str | None) -> dict[str, Any]:
+    """Build a mem0 2.0.0 ``filters`` dict from an admin scope pair.
+
+    mem0 2.0.0 rejects top-level entity keyword arguments and requires a
+    ``filters`` dict that includes at least one of ``user_id``,
+    ``agent_id``, or ``run_id``.  This helper is the single place that
+    maps the admin ``(scope, scope_id)`` pair onto that dict so the rest
+    of the service can stay agnostic of the mem0 2.0.0 contract change.
+
+    Args:
+        scope: One of ``"user"``, ``"agent"``, ``"run"``.
+        scope_id: The scope identifier (e.g. user id).
+
+    Returns:
+        A ``filters`` dict ready to pass to ``memory_instance.get_all``.
+    """
+    if scope not in ("user", "agent", "run"):
+        raise ValueError(f"unsupported scope: {scope!r}")
+    key = f"{scope}_id"
+    return {key: scope_id}
+
+
+# ---------------------------------------------------------------------------
 # AdminService
 # ---------------------------------------------------------------------------
 
@@ -195,30 +360,20 @@ class AdminService:
         for strategy_name, strategy_fn in strategies:
             try:
                 result = strategy_fn()
-                if isinstance(result, list):
-                    records = result
-                    logger.debug(
-                        "list_scopes: strategy %r returned %d records",
-                        strategy_name,
-                        len(records),
-                    )
-                    break
-                if isinstance(result, dict):
-                    # Some mem0 backends wrap the list in a dict
-                    inner = result.get("results") or result.get("data") or []
-                    if isinstance(inner, list):
-                        records = inner
-                        logger.debug(
-                            "list_scopes: strategy %r returned %d records (wrapped)",
-                            strategy_name,
-                            len(records),
-                        )
-                        break
             except Exception as exc:
                 logger.debug(
                     "list_scopes: strategy %r failed: %s", strategy_name, exc
                 )
                 continue
+            unwrapped = _unwrap_results(result)
+            if unwrapped:
+                records = [r for r in unwrapped if isinstance(r, dict)]
+                logger.debug(
+                    "list_scopes: strategy %r returned %d records",
+                    strategy_name,
+                    len(records),
+                )
+                break
         else:
             # 4th strategy: direct PostgreSQL query — final fallback when
             # the mem0 API refuses to return all records without a scope
@@ -333,7 +488,9 @@ class AdminService:
             metadata=prepared_metadata,
             **{scope_param: scope_id},
         )
-        memory_id = self._extract_memory_id(result)
+        memory_id = _extract_memory_id_from_add_result(result)
+        if not memory_id:
+            memory_id = self._extract_memory_id(result)
         return {
             "memory_id": memory_id,
             "scope": scope,
@@ -390,20 +547,16 @@ class AdminService:
             },
         )
 
-        # mem0's update() may return None, a string, or a dict with
-        # unexpected shape (e.g. {"message": "...", "id": "..."})
-        # instead of the full record.  When the response is not a
-        # usable record dict, re-fetch via get().
-        if not isinstance(updated, dict) or "messages" not in updated:
-            fetched = memory_instance.get(memory_id)
-            if fetched is None:
-                raise ValueError(
-                    f"memory {memory_id!r} not found after update"
-                )
-            updated = fetched
+        # mem0's update() return shape varies across versions and backends;
+        # see :func:`_normalize_update_response` for the full compatibility
+        # matrix.  The helper centralises the "either return a usable
+        # record or fall back to get(memory_id)" branch.
+        normalized = _normalize_update_response(
+            updated, memory_id, memory_instance
+        )
 
         try:
-            record = self._anchor_service.normalize_record(updated)
+            record = self._anchor_service.normalize_record(normalized)
             return self._assemble_detail_item(record)
         except Exception as exc:
             raise ValueError(
@@ -441,17 +594,15 @@ class AdminService:
         except Exception:
             raw_records = []
 
-        # Unwrap dict-wrapped response BEFORE checking emptiness
-        if isinstance(raw_records, dict):
-            raw_records = raw_records.get("results") or raw_records.get("data") or []
-
+        # Unwrap dict-wrapped response BEFORE checking emptiness so the
+        # ``mem0 2.0.0`` ``{"results": [...]}`` shape is treated as a list.
+        raw_records = _unwrap_results(raw_records) if isinstance(raw_records, dict) else raw_records
         if not raw_records:
             try:
                 raw_records = self._load_postgres_fallback_records()
             except Exception:
                 raw_records = []
-        if isinstance(raw_records, dict):
-            raw_records = raw_records.get("results") or raw_records.get("data") or []
+        raw_records = _unwrap_results(raw_records) if isinstance(raw_records, dict) else raw_records
 
         records = self._anchor_service.normalize_payload(raw_records) or []
         if not isinstance(records, list):
@@ -553,11 +704,14 @@ class AdminService:
             metadata=target_metadata,
             **{target_param: target_scope_id},
         )
-        target_memory_id = self._extract_memory_id(
-            self._anchor_service.normalize_record(result)
-            if isinstance(result, dict)
-            else result
-        )
+        target_memory_id = _extract_memory_id_from_add_result(result)
+        if not target_memory_id:
+            normalized_result = (
+                self._anchor_service.normalize_record(result)
+                if isinstance(result, dict)
+                else result
+            )
+            target_memory_id = self._extract_memory_id(normalized_result)
         return {
             "source_memory_id": source_memory_id,
             "target_memory_id": target_memory_id,
@@ -644,17 +798,47 @@ class AdminService:
         normalized_project = (project or "").strip()
         scope_provided = scope is not None and scope_id is not None and bool(scope_id)
 
+        # ``scope_provided`` is the guard: when it is true, both
+        # ``scope`` and ``scope_id`` are non-None.  Pre-bind the
+        # narrowed copies here so the two ``if scope_provided:``
+        # branches below are statically type-safe; the asserts also
+        # act as a runtime safety net if a future refactor breaks the
+        # invariant (failing fast with a clear message rather than
+        # calling mem0 with ``None``).
+        narrowed_scope: ScopeType | None = scope if scope_provided else None
+        narrowed_scope_id: str | None = scope_id if scope_provided else None
+
         if scope_provided:
-            scope_param = _scope_param_name(scope)  # type: ignore[arg-type]
+            # The asserts narrow ``narrowed_scope`` / ``narrowed_scope_id``
+            # to their non-None types for the call sites below; they
+            # also act as a runtime safety net on the ``scope_provided``
+            # invariant (the original ``scope``/``scope_id`` are
+            # already known to be non-None by the boolean expression
+            # that computed ``scope_provided``).
+            assert narrowed_scope is not None
+            assert narrowed_scope_id is not None
+            scope_param = _scope_param_name(narrowed_scope)
             trace_backend_operation(
                 "admin.list_memories",
-                scope=scope,
+                scope=narrowed_scope,
                 scope_param=scope_param,
                 page=page,
                 page_size=page_size,
                 has_query=bool(normalized_query),
             )
-            raw_records = memory_instance.get_all(**{scope_param: scope_id})
+            # mem0 2.0.0 requires a ``filters`` dict; older versions and
+            # the in-test ``_FakeMemory`` accept the keyword form too.
+            filters = _build_get_all_filters(narrowed_scope, narrowed_scope_id)
+            try:
+                raw_records = memory_instance.get_all(
+                    filters=filters, **{scope_param: narrowed_scope_id}
+                )
+            except TypeError:
+                # Backward-compat path for fake/older mem0 that reject
+                # ``filters`` and still use top-level entity kwargs.
+                raw_records = memory_instance.get_all(
+                    **{scope_param: narrowed_scope_id}
+                )
         else:
             trace_backend_operation(
                 "admin.list_memories",
@@ -674,9 +858,10 @@ class AdminService:
                 except Exception:
                     raw_records = []
 
-        # Unwrap dict-wrapped response from some mem0 backends
-        if isinstance(raw_records, dict):
-            raw_records = raw_records.get("results") or raw_records.get("data") or []
+        # Unwrap dict-wrapped response from mem0 2.0.0 and other
+        # dict-shaped backends.  ``_unwrap_results`` is a no-op for bare
+        # lists and for ``None`` / unrecognised shapes.
+        raw_records = _unwrap_results(raw_records)
 
         items = self._anchor_service.normalize_payload(raw_records) or []
         if not isinstance(items, list):
@@ -737,11 +922,16 @@ class AdminService:
         )
 
         if scope_provided:
+            # Narrow the pre-bound copies from ``... | None`` to their
+            # concrete types (see the assertion block earlier in this
+            # method for the invariant explanation).
+            assert narrowed_scope is not None
+            assert narrowed_scope_id is not None
             assembled_items = [
                 self._assemble_list_item(
                     record=record,
-                    scope=scope,  # type: ignore[arg-type]
-                    scope_id=scope_id,  # type: ignore[arg-type]
+                    scope=narrowed_scope,
+                    scope_id=narrowed_scope_id,
                     aggregates_by_id=aggregates,
                     max_total=max_total,
                 )
