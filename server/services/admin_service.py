@@ -447,10 +447,7 @@ class AdminService:
 
         if not raw_records:
             try:
-                rows = self._postgres_fallback_query("SELECT payload FROM {table}")
-                raw_records = [
-                    row[0] for row in rows if row and isinstance(row[0], dict)
-                ] if rows else []
+                raw_records = self._load_postgres_fallback_records()
             except Exception:
                 raw_records = []
         if isinstance(raw_records, dict):
@@ -673,13 +670,7 @@ class AdminService:
             # Fall back to PostgreSQL if mem0 get_all() returned nothing
             if not raw_records:
                 try:
-                    rows = self._postgres_fallback_query(
-                        "SELECT payload FROM {table}"
-                    )
-                    raw_records = [
-                        row[0] for row in rows
-                        if isinstance(row[0], dict)
-                    ] if rows else []
+                    raw_records = self._load_postgres_fallback_records()
                 except Exception:
                     raw_records = []
 
@@ -1041,6 +1032,36 @@ class AdminService:
             "popularity": self._popularity_payload(aggregate, max_total),
             "freshness": self._freshness_payload(aggregate, metadata, record),
         }
+
+    def _load_postgres_fallback_records(self) -> list[dict[str, Any]]:
+        rows = self._postgres_fallback_query("SELECT id, payload FROM {table}")
+        records: list[dict[str, Any]] = []
+        for row in rows or []:
+            if not row:
+                continue
+            row_id: Any = None
+            payload: Any = None
+            if len(row) >= 2:
+                row_id, payload = row[0], row[1]
+            elif len(row) == 1:
+                payload = row[0]
+            if not isinstance(payload, dict):
+                continue
+            record = dict(payload)
+            if isinstance(row_id, str) and row_id and not self._extract_memory_id(record):
+                record["id"] = row_id
+            metadata = record.get("metadata")
+            created_at = _extract_created_at(metadata) if isinstance(metadata, dict) else None
+            if not created_at:
+                anchor = record.get("anchor")
+                if isinstance(anchor, dict):
+                    anchor_created_at = anchor.get("created_at")
+                    if isinstance(anchor_created_at, str) and anchor_created_at:
+                        updated_metadata = dict(metadata) if isinstance(metadata, dict) else {}
+                        updated_metadata["created_at"] = anchor_created_at
+                        record["metadata"] = updated_metadata
+            records.append(record)
+        return records
 
     def _assemble_detail_item(self, record: dict[str, Any]) -> dict[str, Any]:
         """Build a detail-item payload from a raw memory record.

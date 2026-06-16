@@ -880,9 +880,9 @@ def test_admin_service_delete_empty_memories_falls_back_to_postgres():
 
     memory = _GetAllEmptyMemory()
     rows = [
-        ({"id": "mem-1", "memory": ""},),
-        ({"id": "mem-2", "messages": [{"role": "user", "content": "still here"}]},),
-        ({"id": "mem-3", "content": "   "},),
+        ("mem-1", {"memory": ""}),
+        ("mem-2", {"messages": [{"role": "user", "content": "still here"}]}),
+        ("mem-3", {"content": "   "}),
         ("ignore-me",),
     ]
     memory.records = {
@@ -899,7 +899,7 @@ def test_admin_service_delete_empty_memories_falls_back_to_postgres():
     response = service.delete_empty_memories(memory)
 
     service._postgres_fallback_query.assert_called_once_with(
-        "SELECT payload FROM {table}"
+        "SELECT id, payload FROM {table}"
     )
     assert response == {
         "deleted_count": 2,
@@ -907,6 +907,35 @@ def test_admin_service_delete_empty_memories_falls_back_to_postgres():
     }
     assert memory.deletes == ["mem-1", "mem-3"]
     assert set(memory.records) == {"mem-2"}
+
+
+def test_admin_service_delete_empty_memories_uses_postgres_row_uuid_when_payload_lacks_id():
+    service = _make_admin_service()
+
+    class _GetAllEmptyMemory(_FakeMemory):
+        def get_all(self, *, user_id=None, agent_id=None, run_id=None):
+            return []
+
+    memory = _GetAllEmptyMemory()
+    memory.records = {
+        "pg-row-1": {"id": "pg-row-1", "memory": ""},
+        "pg-row-2": {"id": "pg-row-2", "memory": "keep me"},
+    }
+    service._postgres_fallback_query = MagicMock(
+        return_value=[
+            ("pg-row-1", {"memory": "", "user_id": "user-1"}),
+            ("pg-row-2", {"memory": "keep me", "user_id": "user-1"}),
+        ]
+    )
+
+    response = service.delete_empty_memories(memory)
+
+    assert response == {
+        "deleted_count": 1,
+        "message": "Deleted 1 empty memories",
+    }
+    assert memory.deletes == ["pg-row-1"]
+    assert set(memory.records) == {"pg-row-2"}
 
 
 def test_admin_service_delete_empty_memories_continues_after_delete_failure():
@@ -936,6 +965,39 @@ def test_admin_service_delete_empty_memories_continues_after_delete_failure():
     }
     assert memory.deletes == ["mem-1", "mem-3"]
     assert set(memory.records) == {"mem-2"}
+
+
+def test_admin_service_list_memories_uses_postgres_row_uuid_when_payload_lacks_id():
+    service = _make_admin_service()
+
+    class _GetAllEmptyMemory(_FakeMemory):
+        def get_all(self, *, user_id=None, agent_id=None, run_id=None):
+            return []
+
+    memory = _GetAllEmptyMemory()
+    service._postgres_fallback_query = MagicMock(
+        return_value=[
+            (
+                "pg-row-1",
+                {
+                    "memory": "visible fallback memory",
+                    "user_id": "user-1",
+                    "anchor": {"created_at": "2026-06-01T12:00:00Z"},
+                },
+            ),
+        ]
+    )
+
+    page = service.list_memories(memory, page=1, page_size=20)
+
+    assert page["total_items"] == 1
+    assert page["total_pages"] == 1
+    item = page["items"][0]
+    assert item["memory_id"] == "pg-row-1"
+    assert item["scope"] == "user"
+    assert item["scope_id"] == "user-1"
+    assert item["content"] == "visible fallback memory"
+    assert item["freshness"].created_at == "2026-06-01T12:00:00Z"
 
 
 def test_admin_service_index_overview_returns_contract_shape():
