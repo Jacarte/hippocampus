@@ -12,6 +12,8 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
+from .mem0_compat import embed, generate_response
+
 logger = logging.getLogger(__name__)
 
 
@@ -85,7 +87,9 @@ class SummaryService:
             },
         ]
         try:
-            response = self._memory.llm.generate_response(messages=messages)
+            response = generate_response(
+                self._memory, messages=messages
+            )
             text = response.strip() if isinstance(response, str) else ""
             if not text:
                 logger.warning("Summary generation returned empty text for chunk%s", name_hint)
@@ -98,7 +102,9 @@ class SummaryService:
     def _generate_embedding(self, text: str) -> Optional[list[float]]:
         """Generate embedding for summary text. Returns None on failure."""
         try:
-            result = self._memory.embedding_model.embed(text, memory_action="add")
+            result = embed(
+                self._memory, text, memory_action="add"
+            )
             if result is None:
                 logger.warning("Embedding model returned None for summary text")
                 return None

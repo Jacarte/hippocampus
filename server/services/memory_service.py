@@ -124,8 +124,15 @@ class MemoryService:
             trace_backend_operation(
                 "memory.get_all", identifiers=sorted(params.keys())
             )
+            # mem0 2.0.0 requires entity-id keys inside ``filters``; the
+            # helper on :class:`RetrievalService` centralises the
+            # translation and pins the explicit ``top_k`` default so the
+            # call shape never silently regresses.
+            mem0_kwargs = self._retrieval_service.build_mem0_get_all_kwargs(
+                identifier_params=params
+            )
             return self._anchor_service.normalize_payload(
-                memory_instance.get_all(**params)
+                memory_instance.get_all(**mem0_kwargs)
             )
 
     def get(self, memory_instance: Any, memory_id: str) -> Any:

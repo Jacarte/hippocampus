@@ -216,7 +216,12 @@ def test_crud_search_history_routes_delegate_through_service_layer(
 
         list_response = client.get("/memories", params={"user_id": "user-1"})
         assert list_response.status_code == 200
-        assert list_response.json()[0]["params"] == {"user_id": "user-1"}
+        # mem0 2.0.0 explicit ``get_all`` kwargs: identifier lives INSIDE
+        # ``filters`` and ``top_k`` is pinned to the SDK default.
+        assert list_response.json()[0]["params"] == {
+            "filters": {"user_id": "user-1"},
+            "top_k": 20,
+        }
 
         get_response = client.get("/memories/memory-1")
         assert get_response.status_code == 200
@@ -319,7 +324,9 @@ def test_retrieval_service_lexical_search_hits_rare_metadata_keyword_without_net
         filters={"source": "chat"},
     )
 
-    assert fake_memory.get_all_calls == [{"user_id": "user-1"}]
+    assert fake_memory.get_all_calls == [
+        {"filters": {"user_id": "user-1"}, "top_k": 20}
+    ]
     assert [result["id"] for result in response["results"]] == ["memory-rare"]
     assert response["results"][0]["_retrieval"] == {
         "stage": "lexical",
@@ -997,7 +1004,18 @@ def test_retrieve_returns_fused_ranked_results_with_capabilities(
 
         def search(self, *, query: str, **params: Any) -> dict[str, Any]:
             assert query == "canonical retrieve endpoint"
-            assert params == {"user_id": "user-1", "filters": {"source": "chat"}}
+            # mem0 2.0.0 explicit kwargs: identifiers live INSIDE ``filters``;
+            # ``top_k``/``threshold``/``rerank`` are explicit defaults.
+            assert params == {
+                "top_k": 20,
+                "filters": {
+                    "user_id": "user-1",
+                    "source": "chat",
+                    "scope": "project",
+                },
+                "threshold": 0.1,
+                "rerank": False,
+            }
             return {
                 "results": [
                     {**self.records["memory-both"], "score": 0.91},
@@ -1215,10 +1233,20 @@ def test_retrieve_ignores_include_cold_context_control_flag_for_filtering(
 
     fake_memory = app.state.memory
     assert isinstance(fake_memory, FakeMemory)
+    # mem0 2.0.0 explicit kwargs: identifiers live INSIDE ``filters``;
+    # ``top_k``/``threshold``/``rerank`` are explicit defaults; the
+    # ``include_cold_context`` control flag is stripped by the retrieval
+    # service before reaching the backend.
     assert fake_memory.last_search_params == {
         "query": "canonical retrieve endpoint",
-        "user_id": "user-1",
-        "filters": {"source": "chat"},
+        "top_k": 20,
+        "filters": {
+            "user_id": "user-1",
+            "source": "chat",
+            "scope": "project",
+        },
+        "threshold": 0.1,
+        "rerank": False,
     }
 
 

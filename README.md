@@ -118,6 +118,9 @@ POSTGRES_DB=postgres
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
 POSTGRES_COLLECTION=mem0_memories
+MEM0_EMBEDDING_MODEL_DIMS=1536
+MEM0_PGVECTOR_DISKANN=false
+MEM0_PGVECTOR_HNSW=false
 
 MEM0_LLM_PROVIDER=openai
 MEM0_LLM_MODEL=gpt-5
@@ -192,7 +195,9 @@ All tests use `fastapi.testclient.TestClient` with fake memory implementations â
 
 ### Canonical mem0ai version
 
-`mem0ai==1.0.3` is the compatibility baseline. Keep it pinned unless a dedicated compatibility task changes it. If the pin changes, update `server/requirements.txt`, run the smoke paths and `pytest tests/ -v`, then update this README.
+`mem0ai==2.0.0` is the compatibility baseline. Keep it pinned unless a dedicated compatibility task changes it. If the pin changes, update `server/requirements.txt`, run the smoke paths and `pytest tests/ -v`, then update this README.
+
+mem0 2.0.0 introduced breaking changes to the `PGVector` constructor (new required positional parameters `embedding_model_dims`, `diskann`, `hnsw`) and to `get_all`/`search` (entity IDs must now be passed inside a `filters` dict rather than as top-level kwargs). The server's `runtime.py`, `retrieval_service.py`, and `admin_service.py` already handle these adaptations.
 
 ### What `/search` does today
 
