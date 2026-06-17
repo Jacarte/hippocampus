@@ -111,13 +111,10 @@ class _FakeMemory:
         record = self.records.get(memory_id)
         if record is None:
             return None
-        record.update(data)
-        if "metadata" in data:
-            record["metadata"] = dict(data["metadata"])
-        if "messages" in data:
-            record["messages"] = list(data["messages"])
-            record["memory"] = data["messages"][0].get("content", "") if data["messages"] else ""
-        self.updates.append({"memory_id": memory_id, "data": data})
+        record["memory"] = data if isinstance(data, str) else data.get("memory", "")
+        if metadata is not None:
+            record["metadata"] = dict(metadata)
+        self.updates.append({"memory_id": memory_id, "data": data, "metadata": metadata})
         return record
 
     def delete(self, memory_id):
@@ -337,7 +334,7 @@ def test_admin_service_stamps_impersonated_by_on_update():
     detail = service.update_memory(memory, memory_id, update_payload)
     assert detail["audit"].impersonated_by == "admin"
     assert memory.updates, "FakeMemory.update should have been called"
-    stored_metadata = memory.updates[0]["data"]["metadata"]
+    stored_metadata = memory.updates[0]["metadata"]
     assert stored_metadata["impersonated_by"] == "admin"
 
 

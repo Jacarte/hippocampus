@@ -90,19 +90,14 @@ class _FakeMemory:
         return results
 
     def update(
-        self, memory_id: str, data: dict[str, Any]
+        self, memory_id: str, data: str, metadata: dict[str, Any] | None = None
     ) -> dict[str, Any] | None:
         record = self.records.get(memory_id)
         if record is None:
             return None
-        record.update(data)
-        if "metadata" in data:
-            record["metadata"] = dict(data["metadata"])
-        if "messages" in data:
-            record["messages"] = list(data["messages"])
-            record["memory"] = (
-                data["messages"][0].get("content", "") if data["messages"] else ""
-            )
+        record["memory"] = data
+        if metadata is not None:
+            record["metadata"] = dict(metadata)
         return record
 
     def delete(self, *, memory_id: str) -> None:
