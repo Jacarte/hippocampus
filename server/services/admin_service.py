@@ -826,16 +826,15 @@ class AdminService:
                 page_size=page_size,
                 has_query=bool(normalized_query),
             )
-            # mem0 2.0.0 requires a ``filters`` dict; older versions and
-            # the in-test ``_FakeMemory`` accept the keyword form too.
+            # mem0 2.0.0 requires a ``filters`` dict (top-level entity
+            # kwargs are rejected); the in-test ``_FakeMemory`` is the
+            # opposite — it still needs top-level kwargs.
             filters = _build_get_all_filters(narrowed_scope, narrowed_scope_id)
             try:
-                raw_records = memory_instance.get_all(
-                    filters=filters, **{scope_param: narrowed_scope_id}
-                )
+                raw_records = memory_instance.get_all(filters=filters)
             except TypeError:
-                # Backward-compat path for fake/older mem0 that reject
-                # ``filters`` and still use top-level entity kwargs.
+                # Fallback for _FakeMemory (and older mem0) that rejects
+                # ``filters`` and expects top-level entity kwargs.
                 raw_records = memory_instance.get_all(
                     **{scope_param: narrowed_scope_id}
                 )
