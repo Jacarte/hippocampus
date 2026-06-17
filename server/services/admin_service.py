@@ -839,7 +839,9 @@ class AdminService:
             # opposite — it still needs top-level kwargs.
             filters = _build_get_all_filters(narrowed_scope, narrowed_scope_id)
             try:
-                raw_records = memory_instance.get_all(filters=filters)
+                raw_records = memory_instance.get_all(
+                    filters=filters, top_k=100000
+                )
             except TypeError:
                 # Fallback for _FakeMemory (and older mem0) that rejects
                 # ``filters`` and expects top-level entity kwargs.
