@@ -585,8 +585,24 @@ class AnchorService:
         if raw_locator is None:
             return None
 
+        if not isinstance(raw_locator, str):
+            import logging
+            logging.getLogger(__name__).warning(
+                "anchor locator is not a string: type=%s value=%s",
+                type(raw_locator).__name__, repr(raw_locator)[:200]
+            )
+            return None
+
         if anchor_type == "file":
-            normalized_locator = raw_locator.replace("\\", "/")
+            try:
+                normalized_locator = raw_locator.replace("\\", "/")
+            except AttributeError:
+                import logging
+                logging.getLogger(__name__).error(
+                    "anchor locator .replace() failed: type=%s value=%s",
+                    type(raw_locator).__name__, repr(raw_locator)[:200]
+                )
+                return None
             while normalized_locator.startswith("./"):
                 normalized_locator = normalized_locator[2:]
             normalized_locator = str(PurePosixPath(normalized_locator))

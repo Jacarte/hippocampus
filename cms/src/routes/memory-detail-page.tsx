@@ -7,6 +7,34 @@ import { getHeatColor } from '../lib/mock-data.ts'
 import { adminApi } from '../lib/api/admin.ts'
 import type { AdminMemoryDetail, ScopeKind } from '../lib/api/types.ts'
 
+/** Convert a metadata value to its string representation for editing. */
+function metadataValueToString(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  return JSON.stringify(value, null, 2)
+}
+
+/** Parse a string value back to its typed representation for the API. */
+function parseMetadataValue(raw: string): unknown {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return raw
+  }
+}
+
+/** Format a metadata value for read-only display, truncating long strings. */
+function formatMetadataDisplay(value: unknown): string {
+  if (value === null || value === undefined) return '\u2014'
+  if (typeof value === 'string') return value.length > 80 ? value.slice(0, 80) + '\u2026' : value
+  return JSON.stringify(value)
+}
+
+/** Whether a stringified metadata value needs a textarea instead of a single-line input. */
+function isLongFormValue(value: string): boolean {
+  return value.length > 80 || value.startsWith('{') || value.startsWith('[')
+}
+
 function scopeToPrefix(scope: ScopeKind): string {
   switch (scope) {
     case 'user':
@@ -25,7 +53,7 @@ export function MemoryDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
-  const [editType, setEditType] = useState('')
+  const [editMetadata, setEditMetadata] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
@@ -61,10 +89,17 @@ export function MemoryDetailPage() {
     }
   }, [memoryId])
 
+  /** Populate edit state from the current memory snapshot. */
   const startEditing = () => {
     if (!memory) return
     setEditContent(memory.content)
-    setEditType(typeof memory.metadata?.type === 'string' ? memory.metadata.type : '')
+    const initial: Record<string, string> = {}
+    if (memory.metadata) {
+      for (const [key, value] of Object.entries(memory.metadata)) {
+        initial[key] = metadataValueToString(value)
+      }
+    }
+    setEditMetadata(initial)
     setEditing(true)
     setSaveError(null)
     setSaveSuccess(false)
@@ -73,9 +108,11 @@ export function MemoryDetailPage() {
   const cancelEditing = () => {
     setEditing(false)
     setEditContent('')
+    setEditMetadata({})
     setSaveError(null)
   }
 
+  /** Parse edited metadata strings back to typed values and send to the API. */
   const handleSave = async () => {
     if (!memoryId || !memory) return
     setSaving(true)
@@ -83,11 +120,18 @@ export function MemoryDetailPage() {
     setSaveSuccess(false)
 
     try {
-      const updatedMetadata = {
-        ...memory.metadata,
-        type: editType,
-        decay_half_life_days: deriveHalfLifeDays(editType),
+      const updatedMetadata: Record<string, unknown> = { ...memory.metadata }
+      for (const [key, strValue] of Object.entries(editMetadata)) {
+        if (strValue === '') {
+          delete updatedMetadata[key]
+        } else {
+          updatedMetadata[key] = parseMetadataValue(strValue)
+        }
       }
+      if (typeof updatedMetadata.type === 'string') {
+        updatedMetadata.decay_half_life_days = deriveHalfLifeDays(updatedMetadata.type)
+      }
+
       const updated = await adminApi.updateMemory(memoryId, {
         messages: [{ role: 'user', content: editContent }],
         metadata: updatedMetadata,
@@ -95,6 +139,7 @@ export function MemoryDetailPage() {
       setMemory(updated)
       setEditing(false)
       setEditContent('')
+      setEditMetadata({})
       setSaveSuccess(true)
       setTimeout(() => setSaveSuccess(false), 3000)
 
@@ -144,7 +189,7 @@ export function MemoryDetailPage() {
             <p className="eyebrow">memory detail</p>
             <h1 className="hero-title">{memory.content}</h1>
             <p className="hero-copy">
-              This route keeps the detail, copy, audit, and raw decay inputs split into stable
+              This route keeps the detail, copy, and raw decay inputs split into stable
               cards so later API wiring does not need to rework the mock-aligned layout.
             </p>
           </div>
@@ -168,8 +213,8 @@ export function MemoryDetailPage() {
         <div className="detail-stack">
           <Panel
             eyebrow="detail"
-            title="Memory content and audit"
-            subtitle="Structured cards keep persisted content, audit provenance, and later visit hooks separate from copy and decay actions."
+            title="Memory content"
+            subtitle="Content editing with metadata managed in a separate panel below."
           >
             <div className="detail-grid">
               <article className="detail-card">
@@ -183,21 +228,6 @@ export function MemoryDetailPage() {
                       disabled={saving}
                       rows={4}
                     />
-                    <label className="field-stack" style={{ marginTop: 'var(--space-3)' }}>
-                      <span className="field-label">Type</span>
-                      <select
-                        className="control-select"
-                        value={editType}
-                        onChange={(e) => setEditType(e.target.value)}
-                        disabled={saving}
-                      >
-                        <option value="">— select type —</option>
-                        <option value="decision">decision</option>
-                        <option value="stable-fact">stable-fact</option>
-                        <option value="procedure">procedure</option>
-                        <option value="problem-fix">problem-fix</option>
-                      </select>
-                    </label>
                     {saveError && <p className="memory-status-text is-error">{saveError}</p>}
                     <div style={{ display: 'inline-flex', gap: 'var(--space-3)', marginTop: 'var(--space-3)' }}>
                       <button className="button" onClick={handleSave} disabled={saving}>
@@ -228,25 +258,58 @@ export function MemoryDetailPage() {
                   locked admin contract already separates content, metadata, and audit blocks.
                 </p>
               </article>
-
-              <article className="detail-card">
-                <p className="micro-label">Audit</p>
-                <div className="timeline">
-                  <div className="timeline-item">
-                    <p className="timeline-title">
-                      impersonated_by={memory.audit?.impersonated_by ?? '—'}
-                    </p>
-                    <p className="timeline-copy">Reserved for all CMS write flows.</p>
-                  </div>
-                  <div className="timeline-item">
-                    <p className="timeline-title">
-                      copied_from={memory.audit?.copied_from ? JSON.stringify(memory.audit.copied_from) : 'null'}
-                    </p>
-                    <p className="timeline-copy">Copy provenance will render here later.</p>
-                  </div>
-                </div>
-              </article>
             </div>
+          </Panel>
+
+          <Panel eyebrow="metadata" title="All metadata fields">
+            <article className="detail-card">
+              <p className="micro-label">{editing ? 'Edit metadata' : 'Metadata'}</p>
+              {editing ? (
+                <dl className="detail-key-value">
+                  {Object.entries(editMetadata).map(([key, value]) => (
+                    <div key={key}>
+                      <dt>{key}</dt>
+                      <dd>
+                        {isLongFormValue(value) ? (
+                          <textarea
+                            className="control-textarea"
+                            value={value}
+                            onChange={(e) =>
+                              setEditMetadata((prev) => ({ ...prev, [key]: e.target.value }))
+                            }
+                            disabled={saving}
+                            rows={3}
+                          />
+                        ) : (
+                          <input
+                            className="control-input mono"
+                            value={value}
+                            onChange={(e) =>
+                              setEditMetadata((prev) => ({ ...prev, [key]: e.target.value }))
+                            }
+                            disabled={saving}
+                          />
+                        )}
+                      </dd>
+                    </div>
+                  ))}
+                  {Object.keys(editMetadata).length === 0 && (
+                    <p className="memory-status-text">No metadata fields to edit</p>
+                  )}
+                </dl>
+              ) : memory.metadata ? (
+                <dl className="detail-key-value">
+                  {Object.entries(memory.metadata).map(([key, value]) => (
+                    <div key={key}>
+                      <dt>{key}</dt>
+                      <dd>{formatMetadataDisplay(value)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : (
+                <p className="memory-status-text">No metadata</p>
+              )}
+            </article>
           </Panel>
 
           <CopyActionShell

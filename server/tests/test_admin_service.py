@@ -107,7 +107,7 @@ class _FakeMemory:
                 continue
         return results
 
-    def update(self, memory_id, data):
+    def update(self, memory_id, data, metadata=None):
         record = self.records.get(memory_id)
         if record is None:
             return None

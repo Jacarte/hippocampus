@@ -539,12 +539,13 @@ class AdminService:
             has_messages=bool(payload.messages),
             impersonator=ADMIN_IMPERSONATOR,
         )
+        # mem0 2.0.0 update() takes data as a plain string (text content),
+        # not a dict.  Metadata is passed as a separate keyword argument.
+        text = payload.messages[0].content if payload.messages else ""
         updated = memory_instance.update(
             memory_id=memory_id,
-            data={
-                "messages": [message.model_dump() for message in payload.messages],
-                "metadata": prepared_metadata,
-            },
+            data=text,
+            metadata=prepared_metadata,
         )
 
         # mem0's update() return shape varies across versions and backends;
@@ -558,6 +559,13 @@ class AdminService:
         try:
             record = self._anchor_service.normalize_record(normalized)
             return self._assemble_detail_item(record)
+        except AttributeError as exc:
+            logger = logging.getLogger(__name__)
+            logger.error(
+                "AttributeError during update detail assembly for memory %s: %s",
+                memory_id, exc, exc_info=True
+            )
+            raise
         except Exception as exc:
             raise ValueError(
                 f"failed to assemble detail for memory {memory_id!r} "
@@ -1305,8 +1313,9 @@ class AdminService:
             if not isinstance(payload, dict):
                 continue
             record = dict(payload)
-            if isinstance(row_id, str) and row_id and not self._extract_memory_id(record):
-                record["id"] = row_id
+            row_id_str = str(row_id) if row_id is not None else ""
+            if row_id_str and not self._extract_memory_id(record):
+                record["id"] = row_id_str
             self._promote_fallback_data_to_memory(record)
             original_anchor = record.get("anchor")
             record["metadata"] = self._synthesize_fallback_metadata(record)

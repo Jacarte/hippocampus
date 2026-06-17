@@ -859,6 +859,8 @@ def _execute_service_call(operation: str, handler: Any) -> Any:
     except HTTPException:
         raise
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         trace_backend_error(operation, exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
