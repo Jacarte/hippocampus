@@ -70,7 +70,9 @@ def get_config_from_env() -> dict[str, Any]:
     temperature = os.environ.get("MEM0_LLM_TEMPERATURE")
     if temperature is not None:
         llm_config["temperature"] = float(temperature)
-
+    openai_base_url=os.environ.get("OPENAI_BASE_URL")
+    if openai_base_url:
+        llm_config["openai_base_url"] = openai_base_url
     extra_config_json = os.environ.get("MEM0_LLM_EXTRA_CONFIG")
     if extra_config_json:
         try:
@@ -99,7 +101,12 @@ def get_config_from_env() -> dict[str, Any]:
         embedder_model = os.environ.get("MEM0_EMBEDDER_MODEL")
         if embedder_model:
             embedder_config["model"] = embedder_model
+        ollama_url = os.environ.get("MEM0_OLLAMA_HOST")
+        if ollama_url:
+            embedder_config["ollama_base_url"] = ollama_url
         embedder["config"] = embedder_config
+
+
 
     if embedder_provider == "openai":
         api_key = os.environ.get("OPENAI_API_KEY")

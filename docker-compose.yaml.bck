@@ -75,21 +75,21 @@ services:
       POSTGRES_COLLECTION: ${POSTGRES_COLLECTION:-mem0_memories}
 
       # LLM Configuration
-      MEM0_LLM_PROVIDER: ${MEM0_LLM_PROVIDER:-litellm}
-      MEM0_LLM_MODEL: ${MEM0_LLM_MODEL:-bedrock-nvidia-nemotron-super-3-120b}
+      MEM0_LLM_PROVIDER: ${MEM0_LLM_PROVIDER:-openai}
+      MEM0_LLM_MODEL: ${MEM0_LLM_MODEL:-gpt-4}
       MEM0_LLM_TEMPERATURE: ${MEM0_LLM_TEMPERATURE:-0.7}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       MEM0_LLM_EXTRA_CONFIG: ${MEM0_LLM_EXTRA_CONFIG:-}
 
-      # LITELLM
-      LITELLM_API_BASE: ${LITELLM_API_BASE:-https://gateway.prd.devtools.trustly.cloud/v1}
-
       # OLLAMA
+      MEM0_OLLAMA_PROVIDER: ${MEM0_OLLAMA_PROVIDER:-ollama}
+      MEM0_OLLAMA_MODEL: ${MEM0_OLLAMA_MODEL:-llama2-13b-chat}
       MEM0_OLLAMA_HOST: ${MEM0_OLLAMA_HOST:-http://host.docker.internal:11434}
+      MEM0_OLLAMA_EMBEDDER: ${MEM0_OLLAMA_EMBEDDER:-mxbai-embed-large}
 
       # Embedder Configuration
-      MEM0_EMBEDDER_PROVIDER: ${MEM0_EMBEDDER_PROVIDER:-ollama}
-      MEM0_EMBEDDER_MODEL: ${MEM0_EMBEDDER_MODEL:-mxbai-embed-large}
+      MEM0_EMBEDDER_PROVIDER: ${MEM0_EMBEDDER_PROVIDER:-openai}
+      MEM0_EMBEDDER_MODEL: ${MEM0_EMBEDDER_MODEL:-text-embedding-3-small}
 
       # Server Configuration
       MEM0_HOST: 0.0.0.0

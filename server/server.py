@@ -870,4 +870,7 @@ app = create_app()
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, **get_runtime_options())
+    options = get_runtime_options()
+    # uvicorn requires an import string (not an app object) to use workers>1 or reload
+    needs_import_string = options.get("workers", 1) > 1 or options.get("reload", False)
+    uvicorn.run("server:app" if needs_import_string else app, **options)
