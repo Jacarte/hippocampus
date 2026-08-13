@@ -1,3 +1,5 @@
+> The cli will be deprecated, even before using it, since there are other better approaches
+
 # mem0server
 
 This repository contains two applications:
