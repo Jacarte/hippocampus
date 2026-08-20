@@ -11,6 +11,4 @@ __pycache__/
 node_modules/
 dist/
 
-# Rust CLI build artifacts
-/cli/target/
 .playwright-mcp/
