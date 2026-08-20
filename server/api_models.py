@@ -187,26 +187,6 @@ class CapabilitiesResponse(BaseModel):
     file_corpus: dict[str, Any]
 
 
-class FileChunksRequest(BaseModel):
-    file_path: str = Field(
-        description="Relative file path as stored in the index (e.g. 'src/main.rs').",
-    )
-    root: str | None = Field(
-        default=None,
-        description=(
-            "Root namespace to scope the query. "
-            "When omitted, chunks from all roots are returned."
-        ),
-    )
-    include_embeddings: bool = Field(
-        default=False,
-        description=(
-            "When True, include raw summary_embedding vectors in the response. "
-            "When False (default), each chunk carries a boolean has_summary_embedding instead."
-        ),
-    )
-
-
 # ---------------------------------------------------------------------------
 # Admin / CMS contract models  (Task 1 — locked contract)
 # These are the additive admin request/response shapes for the internal CMS.

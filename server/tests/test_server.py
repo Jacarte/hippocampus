@@ -2073,12 +2073,16 @@ def test_removed_cli_only_routes_return_normal_404_and_are_absent_from_openapi(
 ):
     app = _make_app_no_live_deps(monkeypatch)
     with TestClient(app) as client:
-        response = client.post("/index/ingest", json={})
+        responses = [
+            client.post("/index/ingest", json={}),
+            client.post("/index/file", json={}),
+        ]
 
-    assert response.status_code == 404
-    assert response.headers["content-type"].startswith("application/json")
-    assert response.json() == {"detail": "Not Found"}
-    assert "/index/ingest" not in app.openapi()["paths"]
+    for response in responses:
+        assert response.status_code == 404
+        assert response.headers["content-type"].startswith("application/json")
+        assert response.json() == {"detail": "Not Found"}
+    assert {"/index/ingest", "/index/file"}.isdisjoint(app.openapi()["paths"])
 
 
 def test_use_chunk_memory_env_parsing(monkeypatch):
@@ -2097,94 +2101,6 @@ def test_use_chunk_memory_env_parsing(monkeypatch):
 
     monkeypatch.delenv("USE_CHUNK_MEMORY", raising=False)
     assert runtime.is_chunk_memory_enabled() is False, "Expected False when unset"
-
-
-def test_index_file_route_returns_empty_for_unknown_file(monkeypatch):
-    app = _make_app_no_live_deps(monkeypatch)
-    with TestClient(app) as client:
-        resp = client.post("/index/file", json={"file_path": "ghost.py"})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["file_path"] == "ghost.py"
-    assert body["chunk_count"] == 0
-    assert body["chunks"] == []
-    assert body["manifest"] is None
-    assert "X-Correlation-ID" in resp.headers
-
-
-def test_index_file_route_returns_chunks_after_sync(monkeypatch, tmp_path):
-    """POST /index/file returns real chunks after a sync of the same root."""
-    import importlib
-    import sys
-    from pathlib import Path
-
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    server = importlib.import_module("server")
-    server = importlib.reload(server)
-
-    class FakeMemory:
-        def __init__(self, config):
-            self.config = config
-
-    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
-
-    (tmp_path / "hello.py").write_text("def hello():\n    pass\n")
-
-    with TestClient(app) as client:
-        sync_resp = client.post("/index/sync", json={"root": str(tmp_path)})
-        assert sync_resp.status_code == 200
-        job_id = sync_resp.json()["job_id"]
-        deadline = time.time() + 10.0
-        while time.time() < deadline:
-            if client.get(f"/index/jobs/{job_id}").json()["status"] == "completed":
-                break
-            time.sleep(0.05)
-
-        resp = client.post("/index/file", json={"file_path": "hello.py", "root": str(tmp_path)})
-
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["file_path"] == "hello.py"
-    assert body["chunk_count"] >= 1
-    assert len(body["chunks"]) >= 1
-    assert body["manifest"] is not None
-    assert body["manifest"]["root"] == str(tmp_path)
-    # embeddings excluded by default
-    for chunk in body["chunks"]:
-        assert "summary_embedding" not in chunk
-        assert "has_summary_embedding" in chunk
-
-
-def test_index_file_route_respects_include_embeddings(monkeypatch, tmp_path):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    server = importlib.import_module("server")
-    server = importlib.reload(server)
-
-    class FakeMemory:
-        def __init__(self, config):
-            self.config = config
-
-    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
-    (tmp_path / "a.py").write_text("def foo(): pass\n")
-
-    with TestClient(app) as client:
-        sync_resp = client.post("/index/sync", json={"root": str(tmp_path)})
-        job_id = sync_resp.json()["job_id"]
-        deadline = time.time() + 10.0
-        while time.time() < deadline:
-            if client.get(f"/index/jobs/{job_id}").json()["status"] == "completed":
-                break
-            time.sleep(0.05)
-        resp = client.post(
-            "/index/file",
-            json={"file_path": "a.py", "root": str(tmp_path), "include_embeddings": True},
-        )
-
-    assert resp.status_code == 200
-    for chunk in resp.json()["chunks"]:
-        # summary_embedding present (may be None if none generated, but key exists)
-        assert "summary_embedding" in chunk
-        assert "has_summary_embedding" not in chunk
 
 
 def test_unified_query_forwards_user_id_to_query_service(monkeypatch):

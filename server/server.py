@@ -18,7 +18,6 @@ from api_models import (
     AdminMemoryVisitRequest,
     AdminScopesResponse,
     CapabilitiesResponse,
-    FileChunksRequest,
     IndexResetRequest,
     IndexSyncRequest,
     MemoryCreate,
@@ -420,17 +419,6 @@ def create_app(
                 **request.app.state.indexing_service.status(),
                 "recent_errors": request.app.state.job_service.recent_errors(),
             },
-        )
-
-    @app.post("/index/file", summary="Get all indexed chunks for a specific file")
-    def index_file_chunks(req: FileChunksRequest, request: Request) -> Any:
-        return _execute_service_call(
-            "index_file_chunks",
-            lambda: request.app.state.indexing_service.file_chunks(
-                file_path=req.file_path,
-                root=req.root,
-                include_embeddings=req.include_embeddings,
-            ),
         )
 
     @app.post("/index/reset", summary="Reset the file corpus index")
