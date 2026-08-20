@@ -340,7 +340,10 @@ def create_app(
         own thread and does not create job records.
 
         Returns:
-            A job record dict with ``job_id`` and ``status="queued"``.
+            A job record dict with ``job_id``.  Because submission schedules
+            work before this handler retrieves the record, ``status`` may be
+            ``queued``, ``running``, or already ``completed`` (or ``failed``
+            if execution raised an exception).
             Poll ``GET /index/jobs/{job_id}`` for progress and errors.
         """
         job_id = request.app.state.job_service.submit(
