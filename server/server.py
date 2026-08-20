@@ -21,7 +21,6 @@ from api_models import (
     FileChunksRequest,
     IndexResetRequest,
     IndexSyncRequest,
-    FileIngestRequest,
     MemoryCreate,
     RetrieveRequest,
     SearchRequest,
@@ -352,35 +351,6 @@ def create_app(
             lambda: request.app.state.job_service.get_job(job_id),
         )
 
-    @app.post("/index/ingest", summary="Ingest file contents into the corpus")
-    def index_ingest(ingest_req: FileIngestRequest, request: Request) -> Any:
-        """Accept pre-read file contents and index them into the corpus.
-
-        Unlike ``POST /index/sync``, which requires the server to read files
-        from its own filesystem, this endpoint accepts file contents in the
-        request body.  Use it when the server is remote or does not share a
-        filesystem with the client.
-
-        The corpus namespace is ``project_id`` when provided, otherwise
-        ``root``.  Using a stable ``project_id`` ensures that chunks from the
-        same project indexed from different machines or paths are stored
-        together and do not collide with other projects.
-
-        Returns immediately with a ``job_id``.  Poll ``GET /index/jobs/{job_id}``
-        for status and errors.
-        """
-        job_id = request.app.state.job_service.submit(
-            request.app.state.indexing_service.ingest,
-            root=ingest_req.root,
-            files=[f.model_dump() for f in ingest_req.files],
-            generate_summaries=ingest_req.generate_summaries,
-            project_id=ingest_req.project_id,
-        )
-        return _execute_service_call(
-            "index_ingest",
-            lambda: request.app.state.job_service.get_job(job_id),
-        )
-
     @app.get("/index/jobs", summary="List background indexing jobs")
     def index_jobs_list(request: Request, limit: int = 50) -> Any:
         """Return the most-recent indexing jobs, newest first.
@@ -403,8 +373,7 @@ def create_app(
         """Return the job record for *job_id*, or raise 404 if not found.
 
         Args:
-            job_id: UUID string returned by ``POST /index/sync`` or
-                ``POST /index/ingest``.
+            job_id: UUID string returned by ``POST /index/sync``.
 
         Returns:
             Job dict with keys ``job_id``, ``status``, ``queued_at``,

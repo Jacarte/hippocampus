@@ -125,13 +125,13 @@ background_job_queue_depth: Gauge = Gauge(
 
 indexing_files_total: Counter = Counter(
     "indexing_files_total",
-    "Total files indexed, partitioned by operation (sync, ingest).",
+    "Total files indexed, partitioned by operation (sync).",
     labelnames=["operation"],
 )
 
 indexing_chunks_total: Counter = Counter(
     "indexing_chunks_total",
-    "Total chunks created during indexing, partitioned by operation (sync, ingest).",
+    "Total chunks created during indexing, partitioned by operation (sync).",
     labelnames=["operation"],
 )
 

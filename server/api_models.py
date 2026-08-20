@@ -187,47 +187,6 @@ class CapabilitiesResponse(BaseModel):
     file_corpus: dict[str, Any]
 
 
-class FileContent(BaseModel):
-    """A single file's path and raw content, as submitted by the client."""
-
-    file_path: str = Field(..., description="Relative file path (e.g. 'src/main.rs').")
-    content: str = Field(..., description="Full raw text content of the file.")
-
-
-class FileIngestRequest(BaseModel):
-    """Request body for POST /index/ingest."""
-
-    root: str = Field(
-        ...,
-        description=(
-            "Logical root label for this batch (e.g. the project path on the client). "
-            "Used as the corpus namespace when *project_id* is not provided. "
-            "Does not need to exist on the server."
-        ),
-    )
-    project_id: str | None = Field(
-        default=None,
-        description=(
-            "Optional stable project identifier (e.g. 'my-app', 'backend-service'). "
-            "When provided, used as the corpus namespace instead of *root*, so that "
-            "chunks from the same project indexed from different machines or paths "
-            "are kept together and do not overlap with other projects."
-        ),
-    )
-    files: list[FileContent] = Field(
-        ...,
-        min_length=1,
-        description="Files to ingest. Each entry carries the relative path and full content.",
-    )
-    generate_summaries: bool = Field(
-        default=False,
-        description=(
-            "When True, generate LLM summaries for each indexed chunk "
-            "(requires memory to be configured)."
-        ),
-    )
-
-
 class FileChunksRequest(BaseModel):
     file_path: str = Field(
         description="Relative file path as stored in the index (e.g. 'src/main.rs').",

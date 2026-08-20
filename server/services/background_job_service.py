@@ -27,7 +27,7 @@ def _now_iso() -> str:
 
 
 class BackgroundJobService:
-    """Submit ingest/sync work items and track their status asynchronously.
+    """Submit indexing work items and track their status asynchronously.
 
     Jobs are executed one at a time (``max_workers=1``) to avoid concurrent
     writes to the in-memory corpus and manifest, which are not independently
@@ -44,7 +44,7 @@ class BackgroundJobService:
     def __init__(self, max_workers: int = 20) -> None:
         self._executor = ThreadPoolExecutor(
             max_workers=max_workers,
-            thread_name_prefix="ingest-worker",
+            thread_name_prefix="index-worker",
         )
         self._jobs: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()

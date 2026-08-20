@@ -2068,6 +2068,19 @@ def test_index_sync_legacy_payload_without_generate_summaries(monkeypatch):
     assert resp.status_code == 200
 
 
+def test_removed_cli_only_routes_return_normal_404_and_are_absent_from_openapi(
+    monkeypatch,
+):
+    app = _make_app_no_live_deps(monkeypatch)
+    with TestClient(app) as client:
+        response = client.post("/index/ingest", json={})
+
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json() == {"detail": "Not Found"}
+    assert "/index/ingest" not in app.openapi()["paths"]
+
+
 def test_use_chunk_memory_env_parsing(monkeypatch):
     import importlib
     runtime = importlib.import_module("services.runtime")
