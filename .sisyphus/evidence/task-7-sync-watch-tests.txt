@@ -1,1 +1,0 @@
-✓ cargo test: 31 passed (1 suite, 0.02s)
