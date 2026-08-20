@@ -2068,21 +2068,50 @@ def test_index_sync_legacy_payload_without_generate_summaries(monkeypatch):
     assert resp.status_code == 200
 
 
-def test_removed_cli_only_routes_return_normal_404_and_are_absent_from_openapi(
-    monkeypatch,
-):
+def test_index_and_query_openapi_inventory_after_cli_only_route_removal(monkeypatch):
     app = _make_app_no_live_deps(monkeypatch)
+    removed_paths = ("/index/ingest", "/index/file")
     with TestClient(app) as client:
-        responses = [
-            client.post("/index/ingest", json={}),
-            client.post("/index/file", json={}),
-        ]
+        responses = [client.post(path, json={}) for path in removed_paths]
 
     for response in responses:
         assert response.status_code == 404
         assert response.headers["content-type"].startswith("application/json")
         assert response.json() == {"detail": "Not Found"}
-    assert {"/index/ingest", "/index/file"}.isdisjoint(app.openapi()["paths"])
+
+    openapi = app.openapi()
+    paths = openapi["paths"]
+    assert set(removed_paths).isdisjoint(paths)
+
+    expected_methods = {
+        "/query": {"post"},
+        "/index/sync": {"post"},
+        "/index/watch/start": {"post"},
+        "/index/watch/stop": {"post"},
+        "/index/status": {"get"},
+        "/index/reset": {"post"},
+        "/query/capabilities": {"get"},
+        "/index/jobs": {"get"},
+        "/index/jobs/{job_id}": {"get"},
+    }
+    for path, methods in expected_methods.items():
+        assert set(paths[path]) == methods
+
+    expected_request_schemas = {
+        ("/query", "post"): "#/components/schemas/UnifiedQueryRequest",
+        ("/index/sync", "post"): "#/components/schemas/IndexSyncRequest",
+        ("/index/watch/start", "post"): "#/components/schemas/WatchStartRequest",
+        ("/index/watch/stop", "post"): "#/components/schemas/WatchStopRequest",
+        ("/index/reset", "post"): "#/components/schemas/IndexResetRequest",
+    }
+    for (path, method), schema_ref in expected_request_schemas.items():
+        request_schema = paths[path][method]["requestBody"]["content"][
+            "application/json"
+        ]["schema"]
+        assert request_schema == {"$ref": schema_ref}
+
+    removed_schemas = {"FileContent", "FileIngestRequest", "FileChunksRequest"}
+    assert removed_schemas.isdisjoint(openapi["components"]["schemas"])
 
 
 def test_use_chunk_memory_env_parsing(monkeypatch):
