@@ -283,13 +283,13 @@ git commit -m "feat(server): forward min_score from /query route to QueryService
 
 ---
 
-## Task 4: Docstring / JSDoc final pass
+## Task 3: Docstring / JSDoc final pass
 
 **Files:**
 - Review: `server/api_models.py` — `UnifiedQueryRequest.min_score` field description
 - Review: `server/services/query_service.py` — `query()` docstring `Args:` block for `min_score`
 
-- [ ] **Step 4.1 — Check every new/changed symbol**
+- [ ] **Step 3.1 — Check every new/changed symbol**
 
 For each file listed above, verify:
 1. Every new field or parameter has a doc comment that says **what it is**, **what the default means**, **valid range**, and **what happens at the boundary (0.0, exactly threshold, above threshold)**.
@@ -300,7 +300,7 @@ Checklist:
 - [ ] `UnifiedQueryRequest.min_score` Field description covers range `[0.0, 1.0]`, default `0.5`, and that `0.0` disables filtering.
 - [ ] `QueryService.query()` `Args:` entry for `min_score` — describes filter semantics (strictly below = excluded).
 
-- [ ] **Step 4.2 — Commit docstring fixes (if any)**
+- [ ] **Step 3.2 — Commit docstring fixes (if any)**
 
 ```bash
 git add server/api_models.py server/services/query_service.py
@@ -321,7 +321,7 @@ git commit -m "docs: final docstring pass for min_score threshold feature"
 | Route passes `min_score` to service | Task 2.1 |
 | Empty `hits: []` when all filtered | Task 1 (test in 1.1, impl in 1.4) |
 | `total` = pre-filter count | Task 1.4 |
-| Docstring final pass | Task 4 |
+| Docstring final pass | Task 3 |
 
 ### Placeholder scan
 None found.

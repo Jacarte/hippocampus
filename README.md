@@ -317,6 +317,8 @@ Fields: `query` (required), `corpora` (`"memory_store"` | `"file_corpus"` | `"al
 { "root": "/Users/javcab/mem0server" }
 ```
 
+The root path must be accessible to the server process. This operation queues a server-side sync. When the client and server do not share a filesystem, the REST `POST /index/ingest` endpoint accepts file contents instead.
+
 #### `mgrep_status`
 
 ```json
@@ -331,9 +333,9 @@ Fields: `query` (required), `corpora` (`"memory_store"` | `"file_corpus"` | `"al
 
 ### v1 scope
 
-- File corpus indexes **code and Markdown files only**.
+- File corpus indexes **supported code, Markdown, plain-text, and reStructuredText files**.
 - Results are **raw ranked hits** — no synthesis or question answering.
-- `mgrep_reset` is **destructive and irreversible**.
+- `mgrep_reset` clears the current index and manifest, so re-indexing is required. Data whose source files are no longer available cannot be recreated.
 - The bridge does not expose memory CRUD endpoints — use the REST API directly.
 
 ---
