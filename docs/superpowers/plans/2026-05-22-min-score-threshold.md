@@ -4,9 +4,9 @@
 
 **Goal:** Add a `min_score` parameter (default `0.5`) to the `/query` endpoint that filters out low-relevance hits server-side before returning the response.
 
-**Architecture:** `UnifiedQueryRequest` gains a `min_score: float` field; `QueryService.query()` gains a matching parameter and applies the filter after sorting but before truncating to `limit`; the CLI gains a `--min-score` flag that is forwarded in the POST body. No client-side filtering; filtering is entirely server-side.
+**Architecture:** `UnifiedQueryRequest` gains a `min_score: float` field; `QueryService.query()` gains a matching parameter and applies the filter after sorting but before truncating to `limit`. Filtering is entirely server-side.
 
-**Tech Stack:** Python 3.11 + Pydantic v2 (server), Rust + serde_json + mockito (CLI)
+**Tech Stack:** Python 3.11 + Pydantic v2
 
 ---
 
@@ -18,8 +18,6 @@
 | `server/services/query_service.py` | Add `min_score` param to `query()`; filter hits after sort |
 | `server/server.py` | Pass `min_score` from request down to `query_service.query()` |
 | `server/tests/test_query_api.py` | Add threshold test cases |
-| `cli/src/main.rs` | Add `--min-score` arg to `Commands::Query` and dispatch |
-| `cli/src/commands/query.rs` | Add `min_score: f64` param; include in POST body |
 
 ---
 
@@ -285,273 +283,11 @@ git commit -m "feat(server): forward min_score from /query route to QueryService
 
 ---
 
-## Task 3: Add `--min-score` to the CLI
-
-**Files:**
-- Modify: `cli/src/main.rs`
-- Modify: `cli/src/commands/query.rs`
-
-### Step 3.1 — Write the failing Rust test
-
-Add to `cli/src/commands/query.rs`, inside the existing `#[cfg(test)] mod tests` block:
-
-```rust
-#[test]
-fn test_query_min_score_forwarded() {
-    let mut server = Server::new();
-    let mock = server
-        .mock("POST", "/query")
-        .with_status(200)
-        .with_header("content-type", "application/json")
-        .with_body(hit_response(serde_json::json!([])))
-        .match_body(mockito::Matcher::Json(serde_json::json!({
-            "query": "hello",
-            "corpora": ["all"],
-            "limit": 10,
-            "min_score": 0.7,
-        })))
-        .create();
-
-    run_query(
-        &server.url(),
-        "hello",
-        &["all".to_string()],
-        10,
-        None,
-        None,
-        None,
-        None,
-        false,
-        0.7_f64,
-    )
-    .unwrap();
-    mock.assert();
-}
-
-#[test]
-fn test_query_default_min_score_included_in_payload() {
-    let mut server = Server::new();
-    let mock = server
-        .mock("POST", "/query")
-        .with_status(200)
-        .with_header("content-type", "application/json")
-        .with_body(hit_response(serde_json::json!([])))
-        .match_body(mockito::Matcher::Json(serde_json::json!({
-            "query": "hello",
-            "corpora": ["all"],
-            "limit": 10,
-            "min_score": 0.5,
-        })))
-        .create();
-
-    run_query(
-        &server.url(),
-        "hello",
-        &["all".to_string()],
-        10,
-        None,
-        None,
-        None,
-        None,
-        false,
-        0.5_f64,
-    )
-    .unwrap();
-    mock.assert();
-}
-```
-
-- [ ] **Step 3.1 — Write the two failing Rust tests** (paste inside the existing `mod tests` block in `cli/src/commands/query.rs`)
-
----
-
-- [ ] **Step 3.2 — Run tests to confirm they fail**
-
-```bash
-cd cli && cargo test query 2>&1 | tail -30
-```
-
-Expected: compile error — `run_query` doesn't accept 10 arguments yet.
-
----
-
-- [ ] **Step 3.3 — Add `min_score` to `run_query` signature and payload**
-
-Update the function signature in `cli/src/commands/query.rs`:
-
-```rust
-/// * `min_score` - Minimum relevance score threshold forwarded to the server.
-///   Hits with a score strictly below this value are excluded by the server
-///   before the response is returned.  Default value from the CLI flag is `0.5`.
-pub fn run_query(
-    base_url: &str,
-    query_text: &str,
-    corpora: &[String],
-    limit: u32,
-    path_filter: Option<&str>,
-    language_filter: Option<&str>,
-    scope_filter: Option<&str>,
-    user_id: Option<&str>,
-    raw: bool,
-    min_score: f64,
-) -> Result<()> {
-```
-
-Add `min_score` to the JSON payload (unconditionally — always include it):
-
-```rust
-let mut payload = json!({
-    "query": query_text,
-    "corpora": corpora,
-    "limit": limit,
-    "min_score": min_score,
-});
-```
-
----
-
-- [ ] **Step 3.4 — Update all existing calls to `run_query` in the test module**
-
-Every existing `run_query(...)` call in the `#[cfg(test)] mod tests` block must gain `, 0.5_f64` as the final argument. There are ~9 calls. Add `0.5_f64` to each one.
-
-Example before:
-```rust
-run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, false)
-    .unwrap();
-```
-
-After:
-```rust
-run_query(&server.url(), "hello", &["all".to_string()], 10, None, None, None, None, false, 0.5_f64)
-    .unwrap();
-```
-
-Also update the `match_body` fixture in `test_query_payload_contains_corpora_and_limit` to include `"min_score": 0.5` (and any other tests that use `match_body` exact matching), since `min_score` is now always in the payload:
-
-```rust
-.match_body(mockito::Matcher::Json(serde_json::json!({
-    "query": "hello",
-    "corpora": ["files"],
-    "limit": 5,
-    "min_score": 0.5,
-})))
-```
-
-Apply the same update to `test_query_path_filter_forwarded`, `test_query_user_id_forwarded`, and `test_query_without_user_id_omits_field`.
-
----
-
-- [ ] **Step 3.5 — Run CLI tests**
-
-```bash
-cd cli && cargo test query 2>&1 | tail -30
-```
-
-Expected: all tests in the `query` module PASS.
-
----
-
-- [ ] **Step 3.6 — Add `--min-score` to `Commands::Query` in `cli/src/main.rs`**
-
-Add the new field to the `Query` variant:
-
-```rust
-Query {
-    query: String,
-    #[arg(long, short = 'c', default_values = &["all"])]
-    corpus: Vec<String>,
-    #[arg(long, short = 'l', default_value = "10")]
-    limit: u32,
-    #[arg(long, short = 'u', default_value = "")]
-    url: String,
-    #[arg(long)]
-    path_filter: Option<String>,
-    #[arg(long)]
-    language_filter: Option<String>,
-    #[arg(long)]
-    scope_filter: Option<String>,
-    /// Scope memory-corpus results to a specific user identifier.
-    #[arg(long)]
-    user_id: Option<String>,
-    /// Minimum relevance score (0.0–1.0). Hits below this threshold are
-    /// excluded by the server before the response is returned. Default: 0.5.
-    #[arg(long, default_value = "0.5")]
-    min_score: f64,
-    #[arg(long)]
-    raw: bool,
-},
-```
-
-Update the match arm that dispatches to `run_query` (in `main.rs`) to destructure `min_score` and pass it:
-
-```rust
-Commands::Query {
-    query,
-    corpus,
-    limit,
-    url,
-    path_filter,
-    language_filter,
-    scope_filter,
-    user_id,
-    min_score,
-    raw,
-} => {
-    let base = resolve_base_url(&url);
-    let resolved_user_id = config::resolve_user_id(user_id.as_deref());
-    commands::query::run_query(
-        &base,
-        &query,
-        &corpus,
-        limit,
-        path_filter.as_deref(),
-        language_filter.as_deref(),
-        scope_filter.as_deref(),
-        Some(&resolved_user_id),
-        raw,
-        min_score,
-    )?;
-}
-```
-
----
-
-- [ ] **Step 3.7 — Build the CLI to confirm no compile errors**
-
-```bash
-cd cli && cargo build 2>&1 | tail -20
-```
-
-Expected: `Finished` with no errors.
-
----
-
-- [ ] **Step 3.8 — Run the full CLI test suite**
-
-```bash
-cd cli && cargo test 2>&1 | tail -30
-```
-
-Expected: all tests PASS.
-
----
-
-- [ ] **Step 3.9 — Commit**
-
-```bash
-git add cli/src/main.rs cli/src/commands/query.rs
-git commit -m "feat(cli): add --min-score flag forwarded to /query as min_score"
-```
-
----
-
 ## Task 4: Docstring / JSDoc final pass
 
 **Files:**
 - Review: `server/api_models.py` — `UnifiedQueryRequest.min_score` field description
 - Review: `server/services/query_service.py` — `query()` docstring `Args:` block for `min_score`
-- Review: `cli/src/commands/query.rs` — doc comment on `run_query()` for `min_score` param
-- Review: `cli/src/main.rs` — `#[arg(...)]` help text for `--min-score`
 
 - [ ] **Step 4.1 — Check every new/changed symbol**
 
@@ -563,13 +299,11 @@ For each file listed above, verify:
 Checklist:
 - [ ] `UnifiedQueryRequest.min_score` Field description covers range `[0.0, 1.0]`, default `0.5`, and that `0.0` disables filtering.
 - [ ] `QueryService.query()` `Args:` entry for `min_score` — describes filter semantics (strictly below = excluded).
-- [ ] `run_query()` doc comment updated with `min_score` entry.
-- [ ] `--min-score` clap help text is human-readable and mentions default.
 
 - [ ] **Step 4.2 — Commit docstring fixes (if any)**
 
 ```bash
-git add server/api_models.py server/services/query_service.py cli/src/commands/query.rs cli/src/main.rs
+git add server/api_models.py server/services/query_service.py
 git commit -m "docs: final docstring pass for min_score threshold feature"
 ```
 
@@ -585,8 +319,6 @@ git commit -m "docs: final docstring pass for min_score threshold feature"
 | `min_score: float = 0.5` on `UnifiedQueryRequest` | Task 1.3 |
 | Server filters hits `< min_score` after sort, before `limit` | Task 1.4 |
 | Route passes `min_score` to service | Task 2.1 |
-| `--min-score` CLI flag, default `0.5` | Task 3.6 |
-| CLI includes `min_score` in POST body | Task 3.3 |
 | Empty `hits: []` when all filtered | Task 1 (test in 1.1, impl in 1.4) |
 | `total` = pre-filter count | Task 1.4 |
 | Docstring final pass | Task 4 |
@@ -595,6 +327,5 @@ git commit -m "docs: final docstring pass for min_score threshold feature"
 None found.
 
 ### Type consistency
-- `min_score: float` (Python) / `min_score: f64` (Rust) — consistent
+- `min_score: float` is consistent across the request model and query service.
 - `total` stays `len(all_hits)` (pre-filter) throughout
-- `run_query` signature: `min_score` is the **last** positional arg after `raw` — consistent between declaration (Task 3.3) and all call sites (Tasks 3.4, 3.6)

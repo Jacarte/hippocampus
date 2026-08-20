@@ -5,7 +5,7 @@
 This repository contains two applications:
 
 - **`server/`** — A FastAPI REST backend over [`mem0ai`](https://github.com/mem0ai/mem0) that exposes memory CRUD, semantic search, hybrid retrieval, file-corpus indexing, and MCP bridge endpoints.
-- **`cli/`** — `m0grep`, a native Rust CLI that indexes a local file corpus and searches across it (and the memory store) via the server's REST API.
+- **`cms/`** — A Bun + React + Vite admin UI for operating the server's memory and indexing endpoints.
 
 The accepted local default server URL is `http://localhost:8000`. The OpenCode memory plugin connects to this address by default.
 
@@ -19,9 +19,7 @@ mem0server/
 │   ├── services/            # Service layer (memory, retrieval, indexing, MCP bridge, …)
 │   ├── tests/               # pytest suite
 │   └── requirements.txt     # Python dependencies
-├── cli/                     # Rust CLI (m0grep)
-│   ├── src/                 # Rust source
-│   └── Cargo.toml
+├── cms/                     # Bun + React + Vite admin UI
 ├── Dockerfile               # Multi-stage build for the server
 ├── docker-compose.yaml      # Server + PostgreSQL/pgvector stack
 ├── start.sh / stop.sh / status.sh / build.sh
@@ -240,92 +238,21 @@ curl -X POST http://localhost:8000/search \
 curl http://localhost:8000/health
 ```
 
+### File indexing options
+
+**`generate_summaries`** — When `true` in a `POST /index/sync` or `POST /index/watch/start` body, the indexing pipeline generates natural-language summaries per chunk. Disabled by default.
+
+**`USE_CHUNK_MEMORY`** (server env var) — Gates chunk-level memory features. Truthy values: `1`, `true`, `yes`.
+
+### Native command-line client removal
+
+The former native command-line client is intentionally no longer distributed. No drop-in command-line replacement exists. The REST API and MCP integration remain supported under their own contracts; neither is a command-line-compatible replacement.
+
 ### OpenCode integration
 
 - Plugin: `~/.config/opencode/plugins/mem0-functional.ts`
 - Backend env var: `MEM0_SERVER_URL`
 - Canonical default: `http://localhost:8000`
-
----
-
-## CLI (`m0grep`)
-
-`m0grep` is the native Rust CLI for the mem0server backend. Source lives in `cli/`. Binary name: `m0grep`.
-
-### Installation
-
-Download the pre-built binary from the [GitHub Releases](https://github.com/your-org/mem0server/releases) page:
-
-```bash
-# example for macOS/Linux — adjust the filename for your platform
-curl -L https://github.com/your-org/mem0server/releases/latest/download/m0grep-x86_64-apple-darwin \
-  -o m0grep
-chmod +x m0grep
-mv m0grep /usr/local/bin/m0grep
-m0grep --help
-```
-
-### Environment
-
-```bash
-export MEM0_SERVER_URL=http://localhost:8000  # default — can be omitted
-```
-
-Every command also accepts `--url` to override the target host.
-
-### Commands
-
-#### query — search the corpus
-
-```bash
-m0grep query "authentication middleware"
-m0grep query "token refresh" --corpus files --language-filter python
-m0grep query "database connection" --limit 5 --path-filter src/db
-m0grep query "retry logic" --raw
-```
-
-**Corpus values:** `all` (default), `files`, `memory`. **Limit range:** 1–50, default 10.
-
-#### sync — index a directory
-
-```bash
-m0grep sync /path/to/project
-m0grep sync /path/to/project --generate-summaries
-```
-
-#### watch — watch for file changes
-
-```bash
-m0grep watch /path/to/project
-m0grep watch /path/to/project --generate-summaries
-m0grep watch /path/to/project --stop
-```
-
-#### status — check index state
-
-```bash
-m0grep status
-```
-
-#### reset — wipe the index
-
-```bash
-m0grep reset
-m0grep reset --yes    # skip confirmation prompt
-```
-
-#### Custom backend URL
-
-```bash
-m0grep status --url http://localhost:9000
-m0grep sync /path/to/project --url http://remote-host:8000
-```
-
-### Server-side flags
-
-**`generate_summaries`** — When `true` in a `POST /index/sync` or `POST /index/watch/start` body, the indexing pipeline generates natural-language summaries per chunk. Disabled by default.
-
-**`USE_CHUNK_MEMORY`** (server env var) — Gates chunk-level memory features. Truthy values: `1`, `true`, `yes`.
 
 ---
 
