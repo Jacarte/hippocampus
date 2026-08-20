@@ -317,7 +317,7 @@ Fields: `query` (required), `corpora` (`"memory_store"` | `"file_corpus"` | `"al
 { "root": "/Users/javcab/mem0server" }
 ```
 
-The root path must be accessible to the server process. This operation queues a server-side sync. When the client and server do not share a filesystem, the REST `POST /index/ingest` endpoint accepts file contents instead.
+The root path must be accessible to the server process, including from inside its container when applicable. This operation queues a server-side sync; poll the returned job through the indexing jobs API to observe completion or errors.
 
 #### `mgrep_status`
 

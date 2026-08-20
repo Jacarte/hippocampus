@@ -29,16 +29,16 @@ def _now_iso() -> str:
 class BackgroundJobService:
     """Submit indexing work items and track their status asynchronously.
 
-    Jobs are executed one at a time (``max_workers=1``) to avoid concurrent
-    writes to the in-memory corpus and manifest, which are not independently
-    thread-safe.  The caller receives a ``job_id`` immediately and can poll
-    ``get_job()`` or ``list_jobs()`` for progress.
+    Jobs run in a configurable thread pool and may overlap when ``max_workers``
+    is greater than one.  The internal lock protects job records, not the
+    submitted callables or their data stores.  The caller receives a ``job_id``
+    immediately and can poll ``get_job()`` or ``list_jobs()`` for progress.
+    A callable that returns a dict containing ``errors`` still completes; those
+    errors remain visible through :meth:`recent_errors`.  Only an exception marks
+    the job itself as failed.
 
     Args:
-        max_workers: Size of the internal thread pool.  Defaults to ``1``
-            (sequential queue) to protect shared in-memory state.  Raise
-            only when corpus/manifest services are replaced with
-            concurrency-safe backends.
+        max_workers: Size of the internal thread pool.  Defaults to ``20``.
     """
 
     def __init__(self, max_workers: int = 20) -> None:

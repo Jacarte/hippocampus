@@ -114,11 +114,11 @@ class IndexingService:
     def sync(self, root: str, generate_summaries: bool = False) -> dict[str, Any]:
         """Synchronise *root* into the corpus and manifest.
 
-        Reads files directly from the server's local filesystem, so *root* must
-        be a path that is accessible to the server process.  This makes it
-        suitable only for co-located (same-machine) use.  Files that were
-        previously indexed but are no longer present on disk are removed from
-        the corpus.  The namespace key is always *root* itself.
+        Reads files directly from the server's filesystem, so *root* must be a
+        path that is accessible to the server process, including from inside its
+        container when applicable.  Files that were previously indexed but are
+        no longer present on disk are removed from the corpus.  The namespace
+        key is always *root* itself.
 
         Args:
             root: Absolute path to the directory tree to index.  Must be
@@ -133,7 +133,10 @@ class IndexingService:
 
         Returns:
             A dict with keys ``root``, ``files_indexed``, ``chunks_indexed``,
-            ``synced_at``, and ``errors``.
+            ``synced_at``, and ``errors``.  An unchanged tree succeeds with zero
+            indexed counts.  Per-file failures are collected in ``errors`` and
+            do not prevent other changed files from being processed.  Indexing
+            counters advance only when at least one file is indexed.
         """
         self._manifest.register_root(root)
 
@@ -231,6 +234,14 @@ class IndexingService:
         }
 
     def status(self) -> dict[str, Any]:
+        """Return a point-in-time summary of the in-memory manifest and corpus.
+
+        The result contains root records, total manifest files, total corpus
+        chunks, and the latest root ``indexed_at`` value.  It does not report
+        background-job progress or watcher thread state; the HTTP status handler
+        adds recent job errors separately.  With no registered roots,
+        ``last_synced_at`` is ``None`` and totals are zero.
+        """
         manifest_status = self._manifest.get_status()
         corpus_status = self._corpus.get_status()
 
@@ -250,6 +261,12 @@ class IndexingService:
         }
 
     def reset(self) -> dict[str, Any]:
+        """Clear the in-memory corpus and manifest and report removed totals.
+
+        The operation is idempotent: resetting empty state returns zero counts.
+        It does not stop watcher threads or alter background-job records, so
+        callers that require a durable empty index must stop watchers separately.
+        """
         corpus_result = self._corpus.reset()
         files_cleared = self._manifest.get_status()["total_files"]
         self._manifest.reset()
