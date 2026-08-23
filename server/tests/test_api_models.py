@@ -25,7 +25,6 @@ from api_models import (
     AdminAuditInfo,
     CopiedFromInfo,
     CapabilitiesResponse,
-    FileHit,
     MemoryHit,
     UnifiedQueryRequest,
     UnifiedQueryResponse,
@@ -49,21 +48,6 @@ REMOVED_INDEX_MODELS = {
 }
 
 
-def test_file_hit_valid():
-    hit = FileHit(
-        path="/src/main.py",
-        language="python",
-        line_start=1,
-        line_end=5,
-        snippet="def foo(): pass",
-        score=0.9,
-        datetime="2026-05-22T09:00:00Z",
-    )
-    assert hit.corpus == "file_corpus"
-    assert hit.datetime == "2026-05-22T09:00:00Z"
-    assert hit.symbol_name is None
-
-
 def test_memory_hit_valid():
     hit = MemoryHit(
         memory_id="abc123",
@@ -80,6 +64,26 @@ def test_unified_query_request_defaults():
     req = UnifiedQueryRequest(query="test")
     assert req.limit == 10
     assert req.corpora == ["all"]
+
+
+@pytest.mark.parametrize("corpus", ["memory_store", "all"])
+def test_unified_query_request_accepts_memory_only_corpora(corpus: str):
+    assert UnifiedQueryRequest(query="test", corpora=[corpus]).corpora == [corpus]
+
+
+def test_unified_query_request_rejects_removed_file_corpus():
+    with pytest.raises(ValidationError):
+        UnifiedQueryRequest(query="test", corpora=["file_corpus"])
+
+
+def test_removed_file_query_models_and_fields_are_absent():
+    import api_models
+
+    assert not hasattr(api_models, "FileHit")
+    assert set(UnifiedQueryRequest.model_fields).isdisjoint(
+        {"path_filter", "language_filter", "scope_filter", "min_score_files"}
+    )
+    assert UnifiedQueryResponse.model_fields["hits"].annotation == list[MemoryHit]
 
 
 def test_unified_query_request_empty_string_raises():
@@ -120,11 +124,9 @@ def test_removed_index_models_are_absent_from_source_exports_and_openapi():
 
 
 def test_capabilities_response_valid():
-    resp = CapabilitiesResponse(
-        memory_store={"enabled": True},
-        file_corpus={"enabled": False},
-    )
+    resp = CapabilitiesResponse(memory_store={"enabled": True})
     assert resp.memory_store["enabled"] is True
+    assert set(resp.model_dump()) == {"memory_store"}
 
 
 # ---------------------------------------------------------------------------
@@ -404,4 +406,3 @@ def test_admin_memory_visit_response_valid():
     )
     assert resp.total_visits == 5
     assert resp.reason == "detail_open"
-

@@ -1952,17 +1952,23 @@ def test_query_capabilities_route_returns_expected_shape(monkeypatch):
         resp = client.get("/query/capabilities")
     assert resp.status_code == 200
     body = resp.json()
-    assert "memory_store" in body
-    assert "file_corpus" in body
+    assert set(body) == {"memory_store"}
     assert isinstance(body["memory_store"], dict)
-    assert isinstance(body["file_corpus"], dict)
+    assert body["memory_store"] == {
+        "lexical": True,
+        "semantic": True,
+        "rerank": False,
+    }
     assert "X-Correlation-ID" in resp.headers
 
 
 def test_unified_query_route_returns_expected_shape(monkeypatch):
     app = _make_app_no_live_deps(monkeypatch)
     with TestClient(app) as client:
-        resp = client.post("/query", json={"query": "hello world", "corpora": ["file_corpus"]})
+        resp = client.post(
+            "/query",
+            json={"query": "hello world", "corpora": ["memory_store"]},
+        )
     assert resp.status_code == 200
     body = resp.json()
     assert "hits" in body
@@ -1970,6 +1976,17 @@ def test_unified_query_route_returns_expected_shape(monkeypatch):
     assert "corpora_queried" in body
     assert "degraded" in body
     assert "X-Correlation-ID" in resp.headers
+
+
+def test_unified_query_file_corpus_is_rejected(monkeypatch):
+    app = _make_app_no_live_deps(monkeypatch)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/query",
+            json={"query": "hello world", "corpora": ["file_corpus"]},
+            follow_redirects=False,
+        )
+    assert resp.status_code == 422
 
 
 def test_unified_query_rejects_empty_query(monkeypatch):
@@ -2049,24 +2066,16 @@ def test_query_contract_remains_in_openapi(monkeypatch):
         "application/json"
     ]["schema"]
     assert request_schema == {"$ref": "#/components/schemas/UnifiedQueryRequest"}
-
-
-def test_use_chunk_memory_env_parsing(monkeypatch):
-    import importlib
-    runtime = importlib.import_module("services.runtime")
-
-    truthy_values = ["1", "true", "True", "TRUE", "yes", "Yes", "YES"]
-    for val in truthy_values:
-        monkeypatch.setenv("USE_CHUNK_MEMORY", val)
-        assert runtime.is_chunk_memory_enabled() is True, f"Expected True for {val!r}"
-
-    falsy_values = ["0", "false", "no", "off", "", "maybe"]
-    for val in falsy_values:
-        monkeypatch.setenv("USE_CHUNK_MEMORY", val)
-        assert runtime.is_chunk_memory_enabled() is False, f"Expected False for {val!r}"
-
-    monkeypatch.delenv("USE_CHUNK_MEMORY", raising=False)
-    assert runtime.is_chunk_memory_enabled() is False, "Expected False when unset"
+    schemas = app.openapi()["components"]["schemas"]
+    query_schema = schemas["UnifiedQueryRequest"]
+    assert query_schema["properties"]["corpora"]["items"]["enum"] == [
+        "memory_store",
+        "all",
+    ]
+    assert set(query_schema["properties"]).isdisjoint(
+        {"path_filter", "language_filter", "scope_filter", "min_score_files"}
+    )
+    assert "FileHit" not in schemas
 
 
 def test_unified_query_forwards_user_id_to_query_service(monkeypatch):
@@ -2091,6 +2100,17 @@ def test_unified_query_forwards_user_id_to_query_service(monkeypatch):
     assert captured.get("user_id") == "alice", (
         f"expected user_id='alice' forwarded to query_service.query, got: {captured}"
     )
+    assert captured["limit"] == 5
+    assert captured["corpora"] == ["all"]
+    assert captured["min_score_memory"] == 0.5
+    assert set(captured) == {
+        "query_text",
+        "corpora",
+        "limit",
+        "memory_instance",
+        "user_id",
+        "min_score_memory",
+    }
 
 
 def test_unified_query_omits_user_id_when_not_provided(monkeypatch):

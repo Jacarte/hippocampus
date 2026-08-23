@@ -26,7 +26,6 @@ from api_models import (
 )
 from services.admin_service import AdminService
 from services.anchor_service import AnchorService
-from services.file_corpus_service import FileCorpusService
 from services.memory_service import MemoryService
 from services.query_service import QueryService
 from services.retrieval_service import RetrievalService
@@ -35,7 +34,6 @@ from services.runtime import (
     get_memory_instance,
     get_runtime_options,
     initialize_memory,
-    is_chunk_memory_enabled,
 )
 from services.tracing import (
     bind_request_id,
@@ -68,12 +66,8 @@ def create_app(
         retrieval_service=RetrievalService(),
         anchor_service=AnchorService(),
     )
-    _corpus = FileCorpusService()
     _retrieval = RetrievalService()
-    app.state.query_service = QueryService(
-        corpus=_corpus,
-        retrieval_service=_retrieval,
-    )
+    app.state.query_service = QueryService(retrieval_service=_retrieval)
     app.state.admin_service = AdminService()
 
     @app.middleware("http")
@@ -273,18 +267,16 @@ def create_app(
             lambda: request.app.state.memory_service.reset(memory_instance),
         )
 
-    @app.post("/query", summary="Unified cross-corpus query")
+    @app.post("/query", summary="Query the memory store")
     def unified_query(query_req: UnifiedQueryRequest, request: Request) -> Any:
-        chunk_memory_enabled = is_chunk_memory_enabled()
         try:
             memory_instance = get_memory_instance(request)
         except Exception:
             memory_instance = None
         logger.info(
-            "query user_id=%s corpora=%s chunk_memory=%s query=%r",
+            "query user_id=%s corpora=%s query=%r",
             query_req.user_id,
             query_req.corpora,
-            chunk_memory_enabled,
             query_req.query,
         )
         return _execute_service_call(
@@ -293,14 +285,9 @@ def create_app(
                 query_text=query_req.query,
                 corpora=query_req.corpora,
                 limit=query_req.limit,
-                path_filter=query_req.path_filter,
-                language_filter=query_req.language_filter,
-                scope_filter=query_req.scope_filter,
-                chunk_memory_enabled=chunk_memory_enabled,
                 memory_instance=memory_instance,
                 user_id=query_req.user_id,
                 min_score_memory=query_req.min_score_memory,
-                min_score_files=query_req.min_score_files,
             ),
         )
 
@@ -313,10 +300,6 @@ def create_app(
                     "lexical": True,
                     "semantic": True,
                     "rerank": False,
-                },
-                file_corpus={
-                    "lexical": True,
-                    "semantic": False,
                 },
             ).model_dump(),
         )

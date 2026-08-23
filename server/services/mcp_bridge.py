@@ -13,8 +13,8 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "mgrep_query",
         "description": (
-            "Search across the memory store and/or file corpus using a natural-language "
-            "or keyword query. Returns ranked hits from the requested corpora."
+            "Search the memory store using a natural-language or keyword query. "
+            "The 'all' compatibility alias also selects only the memory store."
         ),
         "inputSchema": {
             "type": "object",
@@ -25,8 +25,11 @@ TOOLS: list[dict[str, Any]] = [
                 },
                 "corpora": {
                     "type": "array",
-                    "items": {"type": "string", "enum": ["memory_store", "file_corpus", "all"]},
-                    "description": "Corpora to search. Defaults to ['all'].",
+                    "items": {"type": "string", "enum": ["memory_store", "all"]},
+                    "description": (
+                        "Memory-store selector. Defaults to the ['all'] "
+                        "compatibility alias."
+                    ),
                     "default": ["all"],
                 },
                 "limit": {
@@ -35,14 +38,6 @@ TOOLS: list[dict[str, Any]] = [
                     "default": 10,
                     "minimum": 1,
                     "maximum": 50,
-                },
-                "path_filter": {
-                    "type": "string",
-                    "description": "Optional path prefix filter for file corpus results.",
-                },
-                "language_filter": {
-                    "type": "string",
-                    "description": "Optional language filter (e.g. 'python', 'typescript').",
                 },
             },
             "required": ["query"],
@@ -53,7 +48,7 @@ TOOLS: list[dict[str, Any]] = [
 
 def _call_query(args: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {"query": args["query"]}
-    for key in ("corpora", "limit", "path_filter", "language_filter"):
+    for key in ("corpora", "limit"):
         if key in args:
             payload[key] = args[key]
     resp = httpx.post(f"{BACKEND_URL}/query", json=payload, timeout=30)

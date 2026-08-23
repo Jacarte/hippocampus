@@ -1,172 +1,88 @@
 from __future__ import annotations
 
 import importlib
-import sys
-from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-_FIXTURES_ROOT = str(Path(__file__).parent / "fixtures" / "mgrep_repo")
-
-
-def _make_app(monkeypatch: MonkeyPatch) -> Any:
+def _make_memory_app(monkeypatch: MonkeyPatch) -> Any:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    server = importlib.import_module("server")
-    server = importlib.reload(server)
+    server = importlib.reload(importlib.import_module("server"))
 
     class FakeMemory:
         def __init__(self, config: dict[str, Any]) -> None:
             self.config = config
+            self.search_calls: list[dict[str, Any]] = []
 
-    return server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+        def search(self, **kwargs: Any) -> dict[str, Any]:
+            self.search_calls.append(kwargs)
+            return {
+                "results": [
+                    {
+                        "id": "memory-1",
+                        "memory": "production-wired memory result",
+                        "score": 0.88,
+                        "created_at": "2026-05-20T10:00:00Z",
+                        "metadata": {"source": "test"},
+                    }
+                ]
+            }
 
+        def get_all(self, **kwargs: Any) -> list[dict[str, Any]]:
+            return []
 
-def _populate_file_corpus(app: Any) -> None:
-    """Load deterministic fixture chunks without an indexing control plane."""
-    corpus = app.state.query_service._corpus
-    for relative_path, language, content in (
-        (
-            "src/parser.py",
-            "python",
-            'def count_tokens(text: str) -> int: return len(text.split())',
-        ),
-        (
-            "docs/architecture.md",
-            "markdown",
-            "FileCorpusService stores prepared chunks for QueryService retrieval.",
-        ),
-    ):
-        corpus.upsert_chunks(
-            root=_FIXTURES_ROOT,
-            file_path=relative_path,
-            chunks=[{"content": content, "language": language}],
-        )
+    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+    app.state.memory = FakeMemory({})
+    return app
 
 
-# ---------------------------------------------------------------------------
-# 1. Query over a populated corpus returns required provenance fields
-# ---------------------------------------------------------------------------
-
-def test_query_over_prepopulated_corpus_returns_code_and_markdown_hits(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    app = _make_app(monkeypatch)
-    _populate_file_corpus(app)
+def test_memory_only_query_uses_production_wiring(monkeypatch: MonkeyPatch) -> None:
+    app = _make_memory_app(monkeypatch)
 
     with TestClient(app) as client:
-        code_resp = client.post(
+        response = client.post(
             "/query",
-            json={"query": "count_tokens", "corpora": ["file_corpus"]},
+            json={
+                "query": "production wired",
+                "corpora": ["memory_store"],
+                "user_id": "alice",
+                "limit": 4,
+            },
         )
-        assert code_resp.status_code == 200
-        code_body = code_resp.json()
-        assert code_body["total"] >= 1, "Expected at least one hit for 'count_tokens'"
-        assert code_body["degraded"] is False
 
-        hit = code_body["hits"][0]
-        assert hit["corpus"] == "file_corpus"
-        assert "path" in hit
-        assert "snippet" in hit
-        assert "score" in hit
-        assert "parser.py" in hit["path"]
-
-        md_resp = client.post(
-            "/query",
-            json={"query": "FileCorpusService", "corpora": ["file_corpus"]},
-        )
-        assert md_resp.status_code == 200
-        md_body = md_resp.json()
-        assert md_body["total"] >= 1, "Expected a FileCorpusService documentation hit"
-        md_hit = next(h for h in md_body["hits"] if "architecture.md" in h.get("path", ""))
-        assert md_hit["corpus"] == "file_corpus"
-        assert "architecture.md" in md_hit["path"]
+    assert response.status_code == 200
+    body = response.json()
+    assert body["corpora_queried"] == ["memory_store"]
+    assert body["available_hits_by_corpus"] == {"memory_store": 1}
+    assert body["hits"][0]["memory_id"] == "memory-1"
+    assert body["hits"][0]["corpus"] == "memory_store"
+    assert app.state.memory.search_calls[0]["top_k"] == 4
+    assert app.state.memory.search_calls[0]["filters"] == {"user_id": "alice"}
 
 
-# ---------------------------------------------------------------------------
-# 2. Degraded query: file corpus raises → returns memory hits + degraded flag
-# ---------------------------------------------------------------------------
+def test_memory_only_query_reports_backend_degradation(monkeypatch: MonkeyPatch) -> None:
+    app = _make_memory_app(monkeypatch)
 
-def test_degraded_query_file_corpus_raises_returns_memory_hits_and_degraded_flag(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    from services.file_corpus_service import FileCorpusService
-    from services.query_service import QueryService
-    from services.retrieval_service import RetrievalService
+    def fail_search(**kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("memory unavailable")
 
-    app = _make_app(monkeypatch)
-
-    class BrokenCorpus(FileCorpusService):
-        def query(
-            self,
-            query_text: str,
-            filters: dict[str, Any] | None = None,
-            limit: int = 10,
-            chunk_memory_enabled: bool = False,
-            query_embedding: list[float] | None = None,
-        ) -> list[dict[str, Any]]:
-            raise RuntimeError("corpus unavailable")
-
-    class StubRetrieval:
-        def search(self, memory_instance: Any, **_: Any) -> list[dict[str, Any]]:
-            return [
-                {
-                    "id": "mem-stub-1",
-                    "memory": "stub memory result for degraded test",
-                    "metadata": {"source": "test"},
-                    "_retrieval": {"score": 0.75},
-                }
-            ]
-
-    app.state.query_service = QueryService(
-        corpus=BrokenCorpus(),
-        retrieval_service=StubRetrieval(),
-    )
-    app.state.memory = object()
-
+    app.state.memory.search = fail_search
     with TestClient(app) as client:
-        resp = client.post(
-            "/query",
-            json={"query": "stub", "corpora": ["all"]},
-        )
+        response = client.post("/query", json={"query": "hello"})
 
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["degraded"] is True
-    assert any("file_corpus" in r for r in body["degradation_reasons"])
-
-    memory_hits = [h for h in body["hits"] if h.get("corpus") == "memory_store"]
-    assert len(memory_hits) >= 1, "Must return memory hits even when file corpus is degraded"
-    assert "memory_id" in memory_hits[0]
-    assert "content" in memory_hits[0]
-    assert "score" in memory_hits[0]
+    assert response.status_code == 200
+    assert response.json()["degraded"] is True
+    assert response.json()["degradation_reasons"] == [
+        "memory_store: memory unavailable"
+    ]
 
 
-# ---------------------------------------------------------------------------
-# 3. Capabilities endpoint returns both memory_store and file_corpus sections
-# ---------------------------------------------------------------------------
-
-def test_capabilities_endpoint_returns_both_sections(monkeypatch: MonkeyPatch) -> None:
-    app = _make_app(monkeypatch)
-
+def test_capabilities_endpoint_is_memory_only(monkeypatch: MonkeyPatch) -> None:
+    app = _make_memory_app(monkeypatch)
     with TestClient(app) as client:
-        resp = client.get("/query/capabilities")
+        response = client.get("/query/capabilities")
 
-    assert resp.status_code == 200
-    body = resp.json()
-    assert "memory_store" in body, "Capabilities must include memory_store section"
-    assert "file_corpus" in body, "Capabilities must include file_corpus section"
-
-    ms = body["memory_store"]
-    fc = body["file_corpus"]
-    assert isinstance(ms, dict)
-    assert isinstance(fc, dict)
-    assert "lexical" in ms
-    assert "semantic" in ms
-    assert "lexical" in fc
-    assert isinstance(ms["lexical"], bool)
-    assert isinstance(ms["semantic"], bool)
-    assert isinstance(fc["lexical"], bool)
+    assert response.status_code == 200
+    assert set(response.json()) == {"memory_store"}

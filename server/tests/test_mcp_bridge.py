@@ -57,6 +57,12 @@ class TestToolsList:
         query_tool = next(t for t in TOOLS if t["name"] == "mgrep_query")
         assert "query" in query_tool["inputSchema"]["required"]
 
+    def test_mgrep_query_schema_is_memory_only(self):
+        query_tool = next(t for t in TOOLS if t["name"] == "mgrep_query")
+        properties = query_tool["inputSchema"]["properties"]
+        assert properties["corpora"]["items"]["enum"] == ["memory_store", "all"]
+        assert set(properties) == {"query", "corpora", "limit"}
+
     def test_removed_index_tools_are_not_exposed(self):
         names = {tool["name"] for tool in TOOLS}
         assert names.isdisjoint({"mgrep_sync", "mgrep_status", "mgrep_reset"})
@@ -71,16 +77,66 @@ class TestToolsCall:
         return mock
 
     def test_mgrep_query_forwards_to_backend(self):
-        backend_data = {"hits": [], "total": 0, "corpora_queried": ["file_corpus"], "degraded": False, "degradation_reasons": []}
-        with patch("services.mcp_bridge.httpx.post", return_value=self._mock_response(backend_data)) as mock_post:
-            resp = handle_request(_req("tools/call", params={"name": "mgrep_query", "arguments": {"query": "foo"}}))
+        backend_data = {
+            "hits": [],
+            "total": 0,
+            "corpora_queried": ["memory_store"],
+            "degraded": False,
+            "degradation_reasons": [],
+        }
+        with patch(
+            "services.mcp_bridge.httpx.post",
+            return_value=self._mock_response(backend_data),
+        ) as mock_post:
+            resp = handle_request(
+                _req(
+                    "tools/call",
+                    params={
+                        "name": "mgrep_query",
+                        "arguments": {
+                            "query": "foo",
+                            "corpora": ["all"],
+                            "limit": 3,
+                            "path_filter": "ignored",
+                        },
+                    },
+                )
+            )
 
         assert resp["result"]["content"][0]["type"] == "text"
         result_data = json.loads(resp["result"]["content"][0]["text"])
         assert result_data["total"] == 0
         mock_post.assert_called_once()
         call_kwargs = mock_post.call_args
-        assert "query" in call_kwargs.kwargs["json"] or "query" in call_kwargs[1]["json"]
+        assert call_kwargs.kwargs["json"] == {
+            "query": "foo",
+            "corpora": ["all"],
+            "limit": 3,
+        }
+
+    def test_mgrep_query_raw_file_corpus_returns_backend_422_error(self):
+        import httpx
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 422
+        mock_resp.text = '{"detail":"validation failed"}'
+        mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "unprocessable entity", request=MagicMock(), response=mock_resp
+        )
+
+        with patch("services.mcp_bridge.httpx.post", return_value=mock_resp):
+            resp = handle_request(
+                _req(
+                    "tools/call",
+                    params={
+                        "name": "mgrep_query",
+                        "arguments": {"query": "x", "corpora": ["file_corpus"]},
+                    },
+                )
+            )
+
+        assert resp["error"]["code"] == -32000
+        assert "Backend error 422" in resp["error"]["message"]
 
     @pytest.mark.parametrize("tool_name", ["mgrep_sync", "mgrep_status", "mgrep_reset"])
     def test_removed_index_tool_calls_return_unknown_tool(self, tool_name):

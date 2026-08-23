@@ -47,20 +47,7 @@ class RetrieveRequest(BaseModel):
 # Unified query models
 # ---------------------------------------------------------------------------
 
-CorpusType = Literal["memory_store", "file_corpus", "all"]
-
-
-class FileHit(BaseModel):
-    path: str
-    language: str
-    symbol_name: str | None = None
-    symbol_kind: str | None = None
-    line_start: int
-    line_end: int
-    snippet: str
-    score: float
-    datetime: str | None = None
-    corpus: str = "file_corpus"
+CorpusType = Literal["memory_store", "all"]
 
 
 class MemoryHit(BaseModel):
@@ -76,9 +63,6 @@ class UnifiedQueryRequest(BaseModel):
     query: str = Field(..., min_length=1, description="Search query.")
     corpora: list[CorpusType] = Field(default=["all"])
     limit: int = Field(10, ge=1, le=50)
-    path_filter: str | None = None
-    language_filter: str | None = None
-    scope_filter: str | None = None
     user_id: str | None = Field(
         default=None,
         description=(
@@ -97,21 +81,8 @@ class UnifiedQueryRequest(BaseModel):
             "for this corpus."
         ),
     )
-    min_score_files: float = Field(
-        default=0.05,
-        ge=0.0,
-        le=1.0,
-        description=(
-            "Minimum relevance score for file-corpus hits (range 0.0–1.0).  "
-            "Hits from the file corpus with a score strictly below this value "
-            "are excluded.  Defaults to 0.05 (matches typical BM25 noise floor).  "
-            "Set to 0.0 to disable filtering for this corpus."
-        ),
-    )
-
-
 class UnifiedQueryResponse(BaseModel):
-    hits: list[FileHit | MemoryHit]
+    hits: list[MemoryHit]
     total: int
     corpora_queried: list[str]
     available_hits_by_corpus: dict[str, int] = Field(default_factory=dict)
@@ -121,7 +92,6 @@ class UnifiedQueryResponse(BaseModel):
 
 class CapabilitiesResponse(BaseModel):
     memory_store: dict[str, Any]
-    file_corpus: dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
