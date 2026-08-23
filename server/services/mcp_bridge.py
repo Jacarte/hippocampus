@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from typing import Any
 
 import httpx
 
+logger = logging.getLogger(__name__)
+
 BACKEND_URL: str = os.environ.get("MEM0_SERVER_URL", "http://localhost:8000")
+_MAX_DIAGNOSTIC_CHARS = 500
 
 TOOLS: list[dict[str, Any]] = [
     {
@@ -85,6 +89,12 @@ def _write(obj: dict[str, Any], out=None) -> None:
 
 
 def handle_request(req: dict[str, Any]) -> dict[str, Any] | None:
+    """Handle one MCP JSON-RPC request without reflecting bridge failures.
+
+    Backend HTTP failures expose only their status, while transport and internal
+    failures use fixed messages; bounded details are retained in server logs.
+    Notifications and unknown notification methods remain response-free.
+    """
     method: str = req.get("method", "")
     req_id = req.get("id")
 
@@ -116,11 +126,27 @@ def handle_request(req: dict[str, Any]) -> dict[str, Any] | None:
         try:
             result = handler(arguments)
         except httpx.HTTPStatusError as exc:
-            return _error(req_id, -32000, f"Backend error {exc.response.status_code}: {exc.response.text}")
+            status_code = exc.response.status_code
+            logger.warning(
+                "Backend HTTP error status=%s detail=%r",
+                status_code,
+                exc.response.text[:_MAX_DIAGNOSTIC_CHARS],
+            )
+            return _error(req_id, -32000, f"Backend error {status_code}")
         except httpx.RequestError as exc:
-            return _error(req_id, -32000, f"HTTP request failed: {exc}")
+            logger.warning(
+                "Backend request failed type=%s detail=%r",
+                type(exc).__name__,
+                str(exc)[:_MAX_DIAGNOSTIC_CHARS],
+            )
+            return _error(req_id, -32000, "Backend request failed")
         except Exception as exc:  # noqa: BLE001
-            return _error(req_id, -32000, str(exc))
+            logger.error(
+                "MCP bridge error type=%s detail=%r",
+                type(exc).__name__,
+                str(exc)[:_MAX_DIAGNOSTIC_CHARS],
+            )
+            return _error(req_id, -32000, "Bridge error")
 
         return _ok(
             req_id,

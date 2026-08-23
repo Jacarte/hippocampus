@@ -117,9 +117,10 @@ class TestToolsCall:
     def test_mgrep_query_raw_file_corpus_returns_backend_422_error(self):
         import httpx
 
+        sensitive_detail = "submitted-secret-value"
         mock_resp = MagicMock()
         mock_resp.status_code = 422
-        mock_resp.text = '{"detail":"validation failed"}'
+        mock_resp.text = f'{{"detail":"validation failed: {sensitive_detail}"}}'
         mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
             "unprocessable entity", request=MagicMock(), response=mock_resp
         )
@@ -136,7 +137,8 @@ class TestToolsCall:
             )
 
         assert resp["error"]["code"] == -32000
-        assert "Backend error 422" in resp["error"]["message"]
+        assert resp["error"]["message"] == "Backend error 422"
+        assert sensitive_detail not in resp["error"]["message"]
 
     @pytest.mark.parametrize("tool_name", ["mgrep_sync", "mgrep_status", "mgrep_reset"])
     def test_removed_index_tool_calls_return_unknown_tool(self, tool_name):
@@ -166,6 +168,31 @@ class TestToolsCall:
 
         assert "error" in resp
         assert resp["error"]["code"] == -32000
+
+    def test_request_error_does_not_expose_transport_details(self):
+        import httpx
+
+        sensitive_detail = "http://backend.internal/private?token=secret"
+        exc = httpx.RequestError(sensitive_detail, request=MagicMock())
+
+        with patch("services.mcp_bridge.httpx.post", side_effect=exc):
+            resp = handle_request(
+                _req("tools/call", params={"name": "mgrep_query", "arguments": {"query": "x"}})
+            )
+
+        assert resp["error"] == {"code": -32000, "message": "Backend request failed"}
+        assert sensitive_detail not in resp["error"]["message"]
+
+    def test_bridge_error_does_not_expose_exception_details(self):
+        sensitive_detail = "internal validation detail: secret"
+
+        with patch("services.mcp_bridge.httpx.post", side_effect=ValueError(sensitive_detail)):
+            resp = handle_request(
+                _req("tools/call", params={"name": "mgrep_query", "arguments": {"query": "x"}})
+            )
+
+        assert resp["error"] == {"code": -32000, "message": "Bridge error"}
+        assert sensitive_detail not in resp["error"]["message"]
 
 
 class TestUnknownMethod:
