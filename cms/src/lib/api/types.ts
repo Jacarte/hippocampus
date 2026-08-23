@@ -122,8 +122,18 @@ export type AdminScopesResponse = {
 
 export type AdminHealthResponse = Record<string, unknown>
 
+/**
+ * Requests the backend's normalized, memory-only `/query` contract.
+ *
+ * The CMS leaves `corpora` unset, so the backend's `all` compatibility alias
+ * resolves to `memory_store`. File-corpus selectors and filters are unsupported.
+ * Unlike `ReadOnlySearchRequest` and `ReadOnlyRetrieveRequest`, this request
+ * does not expose entity filters or retrieval scopes.
+ */
 export type ReadOnlyQueryRequest = {
+  /** Non-empty memory query text. */
   query: string
+  /** Maximum number of score-qualified hits; the backend accepts 1 through 50. */
   limit?: number
 }
 

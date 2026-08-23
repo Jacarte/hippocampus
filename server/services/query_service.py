@@ -27,11 +27,17 @@ class QueryService:
         """Return score-filtered memory hits and truthful query counts.
 
         Both supported selectors, ``memory_store`` and the compatibility alias
-        ``all``, query only the memory store. ``total`` counts normalized backend
-        candidates before thresholding, while ``available_hits_by_corpus`` counts
-        threshold-qualified hits before the score-ordered result is limited.
-        Missing memory initialization is an empty, non-degraded result. Retrieval
-        failures instead produce an empty degraded result with the backend reason.
+        ``all``, query only the memory store. The HTTP model validates selectors;
+        this service treats the already-validated selector as provenance rather
+        than routing input. Explicit file-corpus selection is unsupported.
+
+        Unlike ``/search`` and ``/retrieve``, this method normalizes each result
+        to :class:`MemoryHit` and applies ``min_score_memory`` after retrieval.
+        ``total`` counts normalized backend candidates before thresholding, while
+        ``available_hits_by_corpus`` counts threshold-qualified hits before the
+        score-ordered result is limited. Missing memory initialization is an
+        empty, non-degraded no-op. Retrieval or normalization failures instead
+        produce an empty degraded result with the backend reason.
         """
         # Pydantic validates HTTP selectors; both supported values alias memory.
         del corpora
@@ -82,7 +88,14 @@ class QueryService:
         user_id: str | None,
         memory_instance: Any | None,
     ) -> list[MemoryHit]:
-        """Normalize retrieval results, or return no hits before memory startup."""
+        """Normalize retrieval results, or return no hits before memory startup.
+
+        ``query_text`` and ``limit`` are always forwarded to the retrieval
+        boundary. ``user_id`` is forwarded only when present. A missing memory
+        instance is a no-op and does not call the retrieval boundary. Every
+        returned hit has ``corpus="memory_store"``; malformed response envelopes
+        raise and are reported as degradation by :meth:`query`.
+        """
         if memory_instance is None:
             return []
 
@@ -107,7 +120,7 @@ class QueryService:
 
     @staticmethod
     def _coerce_memory_results(raw_response: Any) -> list[dict[str, Any]]:
-        """Accept mem0's list form or its ``results`` response envelope."""
+        """Accept mem0's list form or ``results`` envelope, dropping non-dicts."""
         if isinstance(raw_response, list):
             return [record for record in raw_response if isinstance(record, dict)]
         if isinstance(raw_response, dict):
@@ -120,7 +133,7 @@ class QueryService:
 
     @staticmethod
     def _coerce_memory_score(result: dict[str, Any]) -> float:
-        """Prefer a numeric top-level score, then mem0 retrieval metadata."""
+        """Prefer a numeric top-level score, then retrieval metadata, else zero."""
         top_level_score = result.get("score")
         if isinstance(top_level_score, (int, float)):
             return float(top_level_score)
@@ -134,7 +147,7 @@ class QueryService:
 
     @staticmethod
     def _coerce_memory_datetime(result: dict[str, Any]) -> str | None:
-        """Select updated then created timestamps, including metadata fallbacks."""
+        """Select updated then created timestamps, including metadata, else none."""
         for key in ("updated_at", "created_at"):
             value = result.get(key)
             if isinstance(value, str) and value:

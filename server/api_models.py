@@ -48,9 +48,12 @@ class RetrieveRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 CorpusType = Literal["memory_store", "all"]
+"""Selectors accepted by ``POST /query``; ``all`` aliases ``memory_store``."""
 
 
 class MemoryHit(BaseModel):
+    """A normalized memory-store hit returned by ``POST /query``."""
+
     memory_id: str
     content: str
     score: float
@@ -60,13 +63,32 @@ class MemoryHit(BaseModel):
 
 
 class UnifiedQueryRequest(BaseModel):
+    """Request a normalized, score-filtered memory-store query.
+
+    Unlike ``/search`` and ``/retrieve``, this contract exposes normalized
+    query hits and query-specific count/degradation metadata. ``all`` is kept as
+    a compatibility alias for ``memory_store``; file-corpus selectors and
+    filters are unsupported.
+    """
+
     query: str = Field(..., min_length=1, description="Search query.")
-    corpora: list[CorpusType] = Field(default=["all"])
-    limit: int = Field(10, ge=1, le=50)
+    corpora: list[CorpusType] = Field(
+        default=["all"],
+        description=(
+            "Memory-store selector. Both 'memory_store' and the compatibility "
+            "alias 'all' query only the memory store."
+        ),
+    )
+    limit: int = Field(
+        10,
+        ge=1,
+        le=50,
+        description="Maximum number of score-qualified hits to return.",
+    )
     user_id: str | None = Field(
         default=None,
         description=(
-            "Optional user identifier forwarded to the memory corpus for "
+            "Optional user identifier forwarded to the memory store for "
             "per-user scoping.  When omitted the server applies no user filter."
         ),
     )
@@ -76,12 +98,21 @@ class UnifiedQueryRequest(BaseModel):
         le=1.0,
         description=(
             "Minimum relevance score for memory-store hits (range 0.0–1.0).  "
-            "Hits from the memory corpus with a score strictly below this value "
+            "Hits from the memory store with a score strictly below this value "
             "are excluded.  Defaults to 0.5.  Set to 0.0 to disable filtering "
-            "for this corpus."
+            "for memory-store hits."
         ),
     )
+
+
 class UnifiedQueryResponse(BaseModel):
+    """Normalized memory-only query results and degradation metadata.
+
+    ``total`` counts normalized backend candidates before score filtering,
+    whereas ``available_hits_by_corpus`` counts qualifying candidates before
+    ``limit`` is applied. The only corpus reported is ``memory_store``.
+    """
+
     hits: list[MemoryHit]
     total: int
     corpora_queried: list[str]
@@ -91,7 +122,14 @@ class UnifiedQueryResponse(BaseModel):
 
 
 class CapabilitiesResponse(BaseModel):
-    memory_store: dict[str, Any]
+    """Capabilities of ``/query``; unrelated ``/search`` and ``/retrieve`` differ."""
+
+    memory_store: dict[str, Any] = Field(
+        description=(
+            "Memory-store query capabilities. No file-corpus capability is "
+            "supported or advertised."
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

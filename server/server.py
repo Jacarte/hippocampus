@@ -269,6 +269,13 @@ def create_app(
 
     @app.post("/query", summary="Query the memory store")
     def unified_query(query_req: UnifiedQueryRequest, request: Request) -> Any:
+        """Return normalized memory hits for ``memory_store`` or its ``all`` alias.
+
+        Pydantic rejects unsupported file-corpus selectors before this handler.
+        If memory has not initialized, the query service returns an empty,
+        non-degraded response. Unlike ``/search`` and ``/retrieve``, this route
+        applies its own score threshold and normalized response contract.
+        """
         try:
             memory_instance = get_memory_instance(request)
         except Exception:
@@ -293,6 +300,11 @@ def create_app(
 
     @app.get("/query/capabilities", summary="Describe query capabilities")
     def query_capabilities(request: Request) -> Any:
+        """Describe only ``/query`` memory-store behavior.
+
+        The response intentionally excludes the distinct ``/search`` and
+        ``/retrieve`` contracts and advertises no file-corpus capability.
+        """
         return _execute_service_call(
             "query_capabilities",
             lambda: CapabilitiesResponse(

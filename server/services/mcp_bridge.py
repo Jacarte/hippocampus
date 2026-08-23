@@ -47,6 +47,14 @@ TOOLS: list[dict[str, Any]] = [
 
 
 def _call_query(args: dict[str, Any]) -> dict[str, Any]:
+    """Forward the MCP memory query allowlist to ``POST /query``.
+
+    ``all`` is forwarded unchanged and the backend resolves it to
+    ``memory_store``. Unknown arguments, including removed file filters, are
+    ignored. An explicit unsupported corpus remains in ``corpora`` so backend
+    validation can return HTTP 422, which :func:`handle_request` translates to
+    a JSON-RPC backend error.
+    """
     payload: dict[str, Any] = {"query": args["query"]}
     for key in ("corpora", "limit"):
         if key in args:
