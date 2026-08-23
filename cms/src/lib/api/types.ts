@@ -124,10 +124,7 @@ export type AdminHealthResponse = Record<string, unknown>
 
 export type ReadOnlyQueryRequest = {
   query: string
-  corpora?: string[]
   limit?: number
-  path_filter?: string
-  language_filter?: string
 }
 
 export type ReadOnlySearchRequest = {

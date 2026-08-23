@@ -2,7 +2,7 @@
 
 This repository contains two applications:
 
-- **`server/`** — A FastAPI REST backend over [`mem0ai`](https://github.com/mem0ai/mem0) that exposes memory CRUD, semantic search, hybrid retrieval, file-corpus retrieval, and MCP bridge endpoints.
+- **`server/`** — A FastAPI REST backend over [`mem0ai`](https://github.com/mem0ai/mem0) that exposes memory CRUD, semantic search, hybrid retrieval, memory-store queries, and an MCP bridge.
 - **`cms/`** — A Bun + React + Vite admin UI for operating the server's memory endpoints.
 
 The accepted local default server URL is `http://localhost:8000`. The OpenCode memory plugin connects to this address by default.
@@ -14,7 +14,7 @@ hippocampus/
 ├── server/                  # Python FastAPI server
 │   ├── server.py            # App entry point — wires FastAPI routes
 │   ├── api_models.py        # Pydantic request/response models
-│   ├── services/            # Service layer (memory, retrieval, file corpus, MCP bridge, …)
+│   ├── services/            # Service layer (memory, retrieval, anchors, MCP bridge, …)
 │   ├── tests/               # pytest suite
 │   └── requirements.txt     # Python dependencies
 ├── cms/                     # Bun + React + Vite admin UI
@@ -220,6 +220,16 @@ The mem0 2.0 series introduced breaking changes to the `PGVector` constructor (n
 
 If the semantic or lexical stage fails, the endpoint falls back to results from the available stage. If reranking fails after both candidate stages succeed, it returns the fused candidates without reranking. The capability and degradation metadata describes what happened for that request; it does not guarantee stage availability or ranking quality.
 
+### What `/query` does today
+
+`POST /query` searches the memory store and returns normalized, score-filtered memory hits. The optional `corpora` selector accepts `memory_store` and the compatibility alias `all`; both values query only the memory store. Requests that explicitly select `file_corpus` are rejected with HTTP `422`.
+
+`GET /query/capabilities` reports only memory-store capabilities. It does not describe the separate `/search` and `/retrieve` response contracts.
+
+### MCP query interface
+
+The MCP bridge exposes `mgrep_query` for memory-store queries. Its inputs are `query`, optional `limit`, and optional `corpora`; as with `POST /query`, `all` is a compatibility alias for `memory_store`. The advertised selector values are `memory_store` and `all`; a raw bridge call that supplies `file_corpus` fails when the backend rejects it with HTTP `422`. The bridge does not expose memory creation or lifecycle controls.
+
 ### Identifier requirements
 
 `POST /memories`, `GET /memories`, and `DELETE /memories` require at least one of `user_id`, `agent_id`, or `run_id`. Missing identifiers return `400`.
@@ -257,10 +267,6 @@ curl -X POST http://localhost:8000/retrieve \
 # Health check
 curl http://localhost:8000/health
 ```
-
-### File-corpus retrieval
-
-`FileCorpusService` stores prepared file chunks for `/query`. The `USE_CHUNK_MEMORY` server environment variable enables summary-embedding retrieval for chunks that have summary embeddings; lexical file-corpus retrieval remains available when the option is disabled, an embedding is unavailable, or summary retrieval fails. Truthy values are `1`, `true`, and `yes`.
 
 ### Supported client interfaces
 

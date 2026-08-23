@@ -162,12 +162,12 @@
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
       "id": 7,
       "panels": [],
-      "title": "Cross-Corpus Queries",
+      "title": "Memory-Store Queries",
       "type": "row"
     },
     {
       "id": 8,
-      "title": "Query Duration (avg) by Corpus",
+      "title": "Memory-Store Query Duration (avg)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -189,14 +189,14 @@
       "targets": [
         {
           "expr": "rate(query_duration_seconds_sum[$__rate_interval]) / rate(query_duration_seconds_count[$__rate_interval])",
-          "legendFormat": "{{corpus}}",
+          "legendFormat": "memory_store",
           "refId": "A"
         }
       ]
     },
     {
       "id": 9,
-      "title": "Query Hits (avg count) by Corpus",
+      "title": "Memory-Store Query Hits (avg count)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -218,7 +218,7 @@
       "targets": [
         {
           "expr": "rate(query_hits_count_sum[$__rate_interval]) / rate(query_hits_count_count[$__rate_interval])",
-          "legendFormat": "{{corpus}}",
+          "legendFormat": "memory_store",
           "refId": "A"
         }
       ]
