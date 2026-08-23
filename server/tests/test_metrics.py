@@ -17,6 +17,9 @@ from pytest import MonkeyPatch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from services.metrics import query_hits_count
+from services.query_service import QueryService
+
 
 # ---------------------------------------------------------------------------
 # Shared config
@@ -96,6 +99,20 @@ def _configure(client: TestClient) -> None:
     """POST /configure with the minimal config."""
     resp = client.post("/configure", json=_MINIMAL_CONFIG)
     assert resp.status_code == 200, f"configure failed: {resp.text}"
+
+
+def _query_hits_observation_totals() -> tuple[float, float]:
+    """Return the count and sum for memory-store query-hit observations."""
+    samples = {
+        sample.name: sample.value
+        for family in query_hits_count.collect()
+        for sample in family.samples
+        if sample.labels.get("corpus") == "memory_store"
+    }
+    return (
+        samples.get("query_hits_count_count", 0.0),
+        samples.get("query_hits_count_sum", 0.0),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +215,65 @@ def test_query_metrics_emit_only_memory_store_corpus_label(
         if sample.name.startswith(query_metric_names) and "corpus" in sample.labels
     }
     assert corpus_labels == {"memory_store"}
+
+
+def test_query_hits_metric_observes_limited_returned_hits() -> None:
+    """The hit histogram observes the final filtered and limited result count."""
+    class FakeRetrieval:
+        def search(self, *_: Any, **__: Any) -> list[dict[str, Any]]:
+            return [
+                {"id": "low", "memory": "low", "score": 0.2},
+                {"id": "highest", "memory": "highest", "score": 0.95},
+                {"id": "middle", "memory": "middle", "score": 0.75},
+            ]
+
+    before_count, before_sum = _query_hits_observation_totals()
+    response = QueryService(FakeRetrieval()).query(
+        "remember",
+        corpora=["memory_store"],
+        limit=1,
+        memory_instance=object(),
+        min_score_memory=0.5,
+    )
+    after_count, after_sum = _query_hits_observation_totals()
+
+    assert response["total"] == 3
+    assert response["available_hits_by_corpus"] == {"memory_store": 2}
+    assert len(response["hits"]) == 1
+    assert after_count - before_count == 1
+    assert after_sum - before_sum == len(response["hits"])
+
+
+def test_query_hits_metric_observes_zero_for_filtered_and_degraded_results() -> None:
+    """Handled empty and degraded queries each emit a zero-hit observation."""
+    class FilteredRetrieval:
+        def search(self, *_: Any, **__: Any) -> list[dict[str, Any]]:
+            return [{"id": "low", "memory": "low", "score": 0.2}]
+
+    class DegradedRetrieval:
+        def search(self, *_: Any, **__: Any) -> list[dict[str, Any]]:
+            raise RuntimeError("memory unavailable")
+
+    before_count, before_sum = _query_hits_observation_totals()
+    filtered_response = QueryService(FilteredRetrieval()).query(
+        "remember",
+        corpora=["memory_store"],
+        memory_instance=object(),
+        min_score_memory=0.5,
+    )
+    degraded_response = QueryService(DegradedRetrieval()).query(
+        "remember",
+        corpora=["memory_store"],
+        memory_instance=object(),
+    )
+    after_count, after_sum = _query_hits_observation_totals()
+
+    assert filtered_response["hits"] == []
+    assert filtered_response["total"] == 1
+    assert degraded_response["hits"] == []
+    assert degraded_response["degraded"] is True
+    assert after_count - before_count == 2
+    assert after_sum - before_sum == 0
 
 
 # ---------------------------------------------------------------------------

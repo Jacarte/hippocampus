@@ -53,7 +53,6 @@ class QueryService:
                 user_id=user_id,
                 memory_instance=memory_instance,
             )
-            query_hits_count.labels(corpus="memory_store").observe(len(raw_hits))
         except Exception as exc:  # noqa: BLE001
             degraded = True
             degradation_reasons.append(f"memory_store: {exc}")
@@ -70,9 +69,11 @@ class QueryService:
         availability = (
             {"memory_store": len(qualified_hits)} if qualified_hits else {}
         )
+        returned_hits = qualified_hits[:limit]
+        query_hits_count.labels(corpus="memory_store").observe(len(returned_hits))
 
         return UnifiedQueryResponse(
-            hits=qualified_hits[:limit],
+            hits=returned_hits,
             total=len(raw_hits),
             corpora_queried=["memory_store"],
             available_hits_by_corpus=availability,
