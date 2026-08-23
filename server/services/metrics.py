@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from prometheus_client import Counter, Gauge, Histogram
+from prometheus_client import Counter, Histogram
 
 # ---------------------------------------------------------------------------
 # HTTP request metrics
@@ -95,44 +95,6 @@ query_hits_count: Histogram = Histogram(
     "Number of results returned per corpus per cross-corpus query.",
     labelnames=["corpus"],
     buckets=[0, 1, 5, 10, 25, 50],
-)
-
-# ---------------------------------------------------------------------------
-# Background job metrics
-# ---------------------------------------------------------------------------
-
-background_jobs_total: Counter = Counter(
-    "background_jobs_total",
-    "Total background jobs processed, partitioned by status (queued, completed, failed).",
-    labelnames=["status"],
-)
-
-background_job_duration_seconds: Histogram = Histogram(
-    "background_job_duration_seconds",
-    "Background job execution duration in seconds, partitioned by job type.",
-    labelnames=["job_type"],
-    buckets=[1.0, 5.0, 10.0, 30.0, 60.0, 300.0],
-)
-
-background_job_queue_depth: Gauge = Gauge(
-    "background_job_queue_depth",
-    "Current number of queued background jobs awaiting execution.",
-)
-
-# ---------------------------------------------------------------------------
-# Indexing metrics
-# ---------------------------------------------------------------------------
-
-indexing_files_total: Counter = Counter(
-    "indexing_files_total",
-    "Total files indexed, partitioned by operation (sync).",
-    labelnames=["operation"],
-)
-
-indexing_chunks_total: Counter = Counter(
-    "indexing_chunks_total",
-    "Total chunks created during indexing, partitioned by operation (sync).",
-    labelnames=["operation"],
 )
 
 # ---------------------------------------------------------------------------

@@ -253,34 +253,6 @@ class FileCorpusService:
             "roots": root_counts,
         }
 
-    def has_summary_embedding(self, root: str, file_path: str) -> bool:
-        """Return ``True`` when at least one chunk for *file_path* has a summary embedding.
-
-        Used by :class:`AdminService.index_overview` to populate the
-        ``has_summary_embedding`` flag on :class:`AdminIndexFileInfo`
-        without exposing the raw embedding vector.  The check is
-        point-in-time against the in-memory corpus and returns ``False``
-        when no chunk for ``(root, file_path)`` carries a non-empty
-        ``summary_embedding``.
-
-        Args:
-            root: Namespace label the file is stored under.
-            file_path: Relative file path within *root*.
-
-        Returns:
-            ``True`` if any chunk for the file has a non-empty
-            ``summary_embedding``; ``False`` otherwise (including when
-            no chunks exist for the file).
-        """
-        prefix = f"{root}\x00{file_path}\x00"
-        for key, chunk in self._chunks.items():
-            if not key.startswith(prefix):
-                continue
-            if chunk.get("summary_embedding"):
-                return True
-        return False
-
-
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     norm_a = math.sqrt(sum(x * x for x in a))

@@ -25,24 +25,25 @@ def _make_app(monkeypatch: MonkeyPatch) -> Any:
     return server.create_app(memory_factory=FakeMemory, startup_enabled=False)
 
 
-# ---------------------------------------------------------------------------
-# 1. node_modules/ is excluded from the retained file corpus
-# ---------------------------------------------------------------------------
-
-def test_sync_excludes_node_modules(monkeypatch: MonkeyPatch) -> None:
-    app = _make_app(monkeypatch)
-    app.state.indexing_service.sync(_FIXTURES_ROOT)
-
-    with TestClient(app) as client:
-        query_resp = client.post(
-            "/query",
-            json={"query": "some_dep", "corpora": ["file_corpus"]},
-        )
-        assert query_resp.status_code == 200
-        body = query_resp.json()
-        paths = [hit.get("path", "") for hit in body["hits"]]
-        assert not any("node_modules" in p for p in paths), (
-            f"node_modules/ files must not be indexed; got paths: {paths}"
+def _populate_file_corpus(app: Any) -> None:
+    """Load deterministic fixture chunks without an indexing control plane."""
+    corpus = app.state.query_service._corpus
+    for relative_path, language, content in (
+        (
+            "src/parser.py",
+            "python",
+            'def count_tokens(text: str) -> int: return len(text.split())',
+        ),
+        (
+            "docs/architecture.md",
+            "markdown",
+            "FileCorpusService stores prepared chunks for QueryService retrieval.",
+        ),
+    ):
+        corpus.upsert_chunks(
+            root=_FIXTURES_ROOT,
+            file_path=relative_path,
+            chunks=[{"content": content, "language": language}],
         )
 
 
@@ -50,9 +51,11 @@ def test_sync_excludes_node_modules(monkeypatch: MonkeyPatch) -> None:
 # 2. Query over a populated corpus returns required provenance fields
 # ---------------------------------------------------------------------------
 
-def test_query_after_sync_returns_code_and_markdown_hits(monkeypatch: MonkeyPatch) -> None:
+def test_query_over_prepopulated_corpus_returns_code_and_markdown_hits(
+    monkeypatch: MonkeyPatch,
+) -> None:
     app = _make_app(monkeypatch)
-    app.state.indexing_service.sync(_FIXTURES_ROOT)
+    _populate_file_corpus(app)
 
     with TestClient(app) as client:
         code_resp = client.post(
@@ -73,11 +76,11 @@ def test_query_after_sync_returns_code_and_markdown_hits(monkeypatch: MonkeyPatc
 
         md_resp = client.post(
             "/query",
-            json={"query": "IndexingService", "corpora": ["file_corpus"]},
+            json={"query": "FileCorpusService", "corpora": ["file_corpus"]},
         )
         assert md_resp.status_code == 200
         md_body = md_resp.json()
-        assert md_body["total"] >= 1, "Expected at least one hit for 'IndexingService'"
+        assert md_body["total"] >= 1, "Expected a FileCorpusService documentation hit"
         md_hit = next(h for h in md_body["hits"] if "architecture.md" in h.get("path", ""))
         assert md_hit["corpus"] == "file_corpus"
         assert "architecture.md" in md_hit["path"]
@@ -97,7 +100,15 @@ def test_degraded_query_file_corpus_raises_returns_memory_hits_and_degraded_flag
     app = _make_app(monkeypatch)
 
     class BrokenCorpus(FileCorpusService):
-        def query(self, query_text: str, filters: Any = None, limit: int = 10) -> list:
+        def query(
+            self,
+            query_text: str,
+            filters: dict[str, Any] | None = None,
+            limit: int = 10,
+            chunk_memory_enabled: bool = False,
+            query_embedding: list[float] | None = None,
+        ) -> list[dict[str, Any]]:
+            """Simulate an unavailable file corpus for degradation coverage."""
             raise RuntimeError("corpus unavailable")
 
     class StubRetrieval:

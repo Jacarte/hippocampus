@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import importlib
 import sys
-import time
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
@@ -105,7 +103,7 @@ def _configure(client: TestClient) -> None:
 
 
 def test_metrics_module_exports_all_expected_metrics() -> None:
-    """All 17 metric objects are importable from ``services.metrics``."""
+    """All retained metric objects are importable from ``services.metrics``."""
     from services.metrics import (
         http_requests_total,
         http_request_duration_seconds,
@@ -118,11 +116,6 @@ def test_metrics_module_exports_all_expected_metrics() -> None:
         memory_retrieve_hits,
         query_duration_seconds,
         query_hits_count,
-        background_jobs_total,
-        background_job_duration_seconds,
-        background_job_queue_depth,
-        indexing_files_total,
-        indexing_chunks_total,
         file_corpus_operations_total,
     )
 
@@ -140,20 +133,9 @@ def test_metrics_module_exports_all_expected_metrics() -> None:
         memory_retrieve_hits,
         query_duration_seconds,
         query_hits_count,
-        background_jobs_total,
-        background_job_duration_seconds,
-        indexing_files_total,
-        indexing_chunks_total,
         file_corpus_operations_total,
     ):
         assert callable(metric.labels), f"Metric lacks .labels(): {metric}"
-
-    # Gauge-specific checks
-    assert callable(background_job_queue_depth.labels)
-    assert callable(background_job_queue_depth.set)
-    assert callable(background_job_queue_depth.inc)
-    assert callable(background_job_queue_depth.dec)
-
 
 # ---------------------------------------------------------------------------
 # 2. /metrics endpoint format
@@ -332,85 +314,3 @@ def test_retrieval_pipeline_metrics_appear_after_search(
         'memory_retrieve_hits_total{agent_id="",user_id="user-1"}'
     ) in metrics_text, "memory_retrieve_hits not found"
 
-
-# ---------------------------------------------------------------------------
-# 6. Background-job metrics
-# ---------------------------------------------------------------------------
-
-
-def test_background_job_metrics_appear_after_submit(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Background-job counters and gauges appear after submitting a job."""
-    client = _build_client(monkeypatch)
-
-    # Submit a sync job — the background thread runs a no-op mock
-    with patch.object(
-        client.app.state.indexing_service,
-        "sync",
-        return_value={"synced": 0, "errors": []},
-    ):
-        submit_resp = client.post(
-            "/index/sync",
-            json={"root": "/tmp", "generate_summaries": False},
-        )
-    assert submit_resp.status_code == 200
-
-    metrics_text = client.get("/metrics").text
-
-    # Synchronous: queued counter is always present after submit()
-    assert (
-        'background_jobs_total{status="queued"}'
-    ) in metrics_text, "background_jobs_total{status='queued'} not found"
-
-    # The queue-depth gauge should have been set
-    assert "background_job_queue_depth" in metrics_text, (
-        "background_job_queue_depth gauge not found in /metrics"
-    )
-
-    # The duration histogram may not be present if the thread hasn't
-    # finished yet — but the metric family should be registered
-    assert "background_job_duration_seconds" in metrics_text, (
-        "background_job_duration_seconds histogram not found in /metrics"
-    )
-
-
-def test_background_job_completion_metrics_eventually_appear(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """After the background thread completes, ``completed`` counter and
-    duration histogram are observable.
-
-    This is inherently racy — we poll briefly for the expected state.
-    """
-    client = _build_client(monkeypatch)
-
-    with patch.object(
-        client.app.state.indexing_service,
-        "sync",
-        return_value={"synced": 1, "errors": []},
-    ):
-        submit_resp = client.post(
-            "/index/sync",
-            json={"root": "/tmp", "generate_summaries": False},
-        )
-    assert submit_resp.status_code == 200
-
-    # Poll /metrics until we see completed or time out
-    deadline = time.monotonic() + 5.0
-    found_completed = False
-    while time.monotonic() < deadline:
-        metrics_text = client.get("/metrics").text
-        if 'background_jobs_total{status="completed"}' in metrics_text:
-            found_completed = True
-            break
-        time.sleep(0.05)
-
-    assert found_completed, (
-        "background_jobs_total{status='completed'} not observed within 5s"
-    )
-
-    # Duration histogram should also be present after completion
-    assert "background_job_duration_seconds_count" in metrics_text, (
-        "background_job_duration_seconds_count not found after job completion"
-    )

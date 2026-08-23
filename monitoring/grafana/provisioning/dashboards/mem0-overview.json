@@ -245,51 +245,6 @@
           "refId": "A"
         }
       ]
-    },
-    {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
-      "id": 10,
-      "panels": [],
-      "title": "Background Processing",
-      "type": "row"
-    },
-    {
-      "id": 11,
-      "title": "Job Queue Depth",
-      "type": "timeseries",
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 27 },
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": { "lineInterpolation": "stepAfter" },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "orange", "value": 10 },
-              { "color": "red", "value": 50 }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "calcs": ["mean", "max"],
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": { "mode": "multi" }
-      },
-      "targets": [
-        {
-          "expr": "background_job_queue_depth",
-          "legendFormat": "queue depth",
-          "refId": "A"
-        }
-      ]
     }
   ]
 }

@@ -10,11 +10,6 @@ import pytest
 from pydantic import ValidationError
 
 from api_models import (
-    AdminIndexJobInfo,
-    AdminIndexLimits,
-    AdminIndexOverviewResponse,
-    AdminIndexRootInfo,
-    AdminIndexVisibilityInputs,
     AdminMemoryCopyRequest,
     AdminMemoryCopyResponse,
     AdminMemoryCreateRequest,
@@ -415,61 +410,15 @@ def test_admin_memory_visit_response_valid():
     assert resp.reason == "detail_open"
 
 
-def test_admin_index_root_info_valid():
-    root = AdminIndexRootInfo(
-        root="/workspace",
-        total_files=10,
-        total_chunks=42,
-        watcher_active=True,
-        last_job_id="job-1",
-    )
-    assert root.total_files == 10
-    assert root.watcher_active is True
+def test_removed_admin_index_models_are_not_exported():
+    import api_models
 
-
-def test_admin_index_root_info_defaults():
-    root = AdminIndexRootInfo(root="/empty", total_files=0, total_chunks=0)
-    assert root.watcher_active is False
-    assert root.last_job_id is None
-
-
-def test_admin_index_job_info_valid():
-    job = AdminIndexJobInfo(
-        job_id="job-1",
-        status="completed",
-        queued_at="2026-06-10T10:00:00Z",
-        started_at="2026-06-10T10:00:01Z",
-        completed_at="2026-06-10T10:00:30Z",
-        result={"files": 3},
-        errors=[],
-    )
-    assert job.status == "completed"
-    assert job.result == {"files": 3}
-
-
-def test_admin_index_limits_contract():
-    limits = AdminIndexLimits()
-    assert limits.current_process_state_only is True
-
-
-def test_admin_index_overview_response_valid():
-    resp = AdminIndexOverviewResponse(
-        roots=[
-            AdminIndexRootInfo(root="/workspace", total_files=5, total_chunks=20)
-        ],
-        jobs=[
-            AdminIndexJobInfo(job_id="job-1", status="completed")
-        ],
-        files=[],
-        limits=AdminIndexLimits(),
-        visibility_inputs=AdminIndexVisibilityInputs(
-            generated_at="2026-06-10T12:00:00Z",
-            root_count=1,
-            file_count=5,
-            chunk_count=20,
-        ),
-    )
-    assert len(resp.roots) == 1
-    assert len(resp.jobs) == 1
-    assert resp.limits.current_process_state_only is True
-    assert resp.visibility_inputs.root_count == 1
+    removed_models = {
+        "AdminIndexRootInfo",
+        "AdminIndexJobInfo",
+        "AdminIndexFileInfo",
+        "AdminIndexLimits",
+        "AdminIndexVisibilityInputs",
+        "AdminIndexOverviewResponse",
+    }
+    assert all(not hasattr(api_models, name) for name in removed_models)

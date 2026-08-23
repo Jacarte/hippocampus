@@ -11,8 +11,8 @@ The service is the **single** place that:
 * Persists visit telemetry through :class:`VisitStore`, keeping the
   counters independent of mem0 metadata.
 
-The service is **narrow** by design — Task 5/6/9 will fill in the concrete
-list/detail/create/update/delete/copy/visit/index flows.  The methods exposed
+The service is **narrow** by design — Task 5/6 will fill in the concrete
+list/detail/create/update/delete/copy/visit flows.  The methods exposed
 here are thin placeholders that already enforce the audit-stamping rules and
 delegated persistence, so Task 3 can wire routes and Task 5/6/9 can replace
 the placeholders without changing the seam.
@@ -31,13 +31,7 @@ from typing import Any
 from api_models import (
     AdminAuditInfo,
     AdminFreshnessInfo,
-    AdminIndexFileInfo,
-    AdminIndexJobInfo,
-    AdminIndexLimits,
-    AdminIndexOverviewResponse,
     AdminScopesResponse,
-    AdminIndexRootInfo,
-    AdminIndexVisibilityInputs,
     AdminMemoryCopyRequest,
     AdminMemoryCreateRequest,
     AdminMemoryUpdateRequest,
@@ -48,7 +42,6 @@ from api_models import (
 )
 
 from .anchor_service import AnchorService
-from .file_scanner import FileScanner
 from .tracing import trace_backend_operation
 from .visit_store import VisitAggregates, VisitStore
 
@@ -93,25 +86,6 @@ def _scope_param_name(scope: ScopeType) -> str:
     if scope == "run":
         return "run_id"
     raise ValueError(f"unsupported scope: {scope!r}")
-
-
-def _now_iso() -> str:
-    """Return the current UTC time as an ISO 8601 string with ``Z`` suffix.
-
-    Centralized so callers do not have to import ``datetime`` themselves.
-    """
-    from datetime import datetime, timezone
-
-    return (
-        datetime.now(timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
-    )
-
-
-def _as_iso_string(value: Any) -> str | None:
-    """Return *value* when it is already a string, otherwise ``None``."""
-    return value if isinstance(value, str) else None
 
 
 # ---------------------------------------------------------------------------
@@ -1053,91 +1027,6 @@ class AdminService:
             "reason": reason,
         }
 
-    # -- index overview (placeholder filled by Task 9) --------------------
-
-    def index_overview(
-        self,
-        indexing_service: Any,
-        job_service: Any,
-        watch_service: Any | None = None,
-    ) -> AdminIndexOverviewResponse:
-        """Return an :class:`AdminIndexOverviewResponse` for the current state.
-
-        Aggregates the **current server-process** state from existing
-        indexing, job, watch, and file services.  The result is *not*
-        a durable manifest — the ``limits.current_process_state_only``
-        flag in the response signals this explicitly so the CMS can
-        present it as a live view rather than historical data.
-
-        Truthful-current-process contract:
-
-        * ``roots`` — derived from the in-memory manifest.  When the
-          manifest is empty, the function falls back to the indexing
-          service status to surface roots that have run a sync but
-          have not been materialised into the manifest yet.
-        * ``watcher_active`` — sourced from :class:`WatchService`
-          (when available) and **not** from the manifest's
-          ``RootManifest.watching`` field, which is only mutated
-          indirectly.  Falls back to ``False`` when no watch service
-          is reachable.
-        * ``files`` — derived from the in-memory manifest records
-          (one row per ``(root, file_path)`` pair).  ``language`` is
-          derived from the file extension via
-          :meth:`FileScanner.language_for` and ``has_summary_embedding``
-          is computed against the live corpus via
-          :meth:`IndexingService.file_has_summary_embedding`.  When
-          the manifest has no entries the file list is empty.
-        * ``jobs`` — most-recent jobs (newest first, capped at 20)
-          from the background job service.
-        * ``visibility_inputs.chunk_count`` — sourced from the corpus
-          status when available, otherwise derived from the sum of
-          per-root chunk counts.
-
-        Args:
-            indexing_service: The live :class:`IndexingService` instance
-                (used for both manifest and corpus access).
-            job_service: The live :class:`BackgroundJobService` instance
-                used to source the ``jobs`` list.
-            watch_service: Optional :class:`WatchService` instance used
-                to populate ``watcher_active``.  ``None`` (or a service
-                without an ``is_watching`` method) results in
-                ``watcher_active=False`` for every root.
-
-        Returns:
-            An :class:`AdminIndexOverviewResponse` aggregating the
-            current server-known state.  The ``limits`` field is
-            always ``{"current_process_state_only": true}``.
-        """
-        trace_backend_operation("admin.index_overview")
-
-        manifest_status = self._safe_manifest_status(indexing_service)
-        indexing_status = self._safe_indexing_status(indexing_service)
-
-        roots = self._collect_roots(
-            manifest_status=manifest_status,
-            indexing_status=indexing_status,
-            job_service=job_service,
-            watch_service=watch_service,
-        )
-
-        jobs = self._collect_recent_jobs(job_service, limit=20)
-        files = self._collect_file_records(indexing_service)
-        total_files = self._total_files(indexing_service, manifest_status)
-        total_chunks = self._total_chunks(indexing_service, indexing_status, roots)
-
-        return AdminIndexOverviewResponse(
-            roots=roots,
-            jobs=jobs,
-            files=files,
-            limits=AdminIndexLimits(current_process_state_only=True),
-            visibility_inputs=AdminIndexVisibilityInputs(
-                generated_at=_now_iso(),
-                root_count=len(roots),
-                file_count=total_files,
-                chunk_count=total_chunks,
-            ),
-        )
-
     # -- internal helpers -------------------------------------------------
 
     @staticmethod
@@ -1815,260 +1704,6 @@ class AdminService:
         except Exception:
             return None
 
-    @staticmethod
-    def _latest_job_for_root(job_service: Any, root: str) -> str | None:
-        """Return the most-recent job id that touched *root*, if any."""
-        if job_service is None or not hasattr(job_service, "list_jobs"):
-            return None
-        try:
-            jobs = job_service.list_jobs(limit=50)
-        except Exception:
-            return None
-        for job in jobs or []:
-            result = job.get("result") if isinstance(job, dict) else None
-            if isinstance(result, dict) and result.get("root") == root:
-                job_id = job.get("job_id")
-                if isinstance(job_id, str):
-                    return job_id
-        return None
-
-    @staticmethod
-    def _collect_recent_jobs(
-        job_service: Any, *, limit: int
-    ) -> list[AdminIndexJobInfo]:
-        """Project background jobs into the admin index schema."""
-        if job_service is None or not hasattr(job_service, "list_jobs"):
-            return []
-        try:
-            jobs = job_service.list_jobs(limit=limit)
-        except Exception:
-            return []
-        out: list[AdminIndexJobInfo] = []
-        for job in jobs or []:
-            if not isinstance(job, dict):
-                continue
-            out.append(
-                AdminIndexJobInfo(
-                    job_id=str(job.get("job_id", "")),
-                    status=str(job.get("status", "unknown")),
-                    queued_at=_as_iso_string(job.get("queued_at")),
-                    started_at=_as_iso_string(job.get("started_at")),
-                    completed_at=_as_iso_string(job.get("completed_at")),
-                    result=job.get("result")
-                    if isinstance(job.get("result"), dict)
-                    else None,
-                    errors=job.get("errors") or None,
-                )
-            )
-        return out
-
-    @staticmethod
-    def _collect_file_records(indexing_service: Any) -> list[AdminIndexFileInfo]:
-        """Project manifest file records into the admin index schema.
-
-        Reads file-level state through the public
-        :meth:`IndexingService.iter_manifest_files` accessor (added
-        alongside :class:`FileCorpusService.has_summary_embedding`)
-        rather than reaching into the private ``_manifest._files``
-        dict and the (non-existent) ``_corpus.has_summary_embeddings``
-        method.  ``language`` is derived from the file extension via
-        :func:`services.file_scanner.language_for` so the response
-        carries the same mapping :class:`FileScanner.scan` uses.
-
-        Args:
-            indexing_service: The live :class:`IndexingService`.  ``None``
-                yields an empty list (consistent with the
-                :class:`IndexingService` always being present at the
-                route layer).
-
-        Returns:
-            A list of :class:`AdminIndexFileInfo` reflecting the
-            current in-memory manifest.  Always empty when no
-            indexing has happened in this process.
-        """
-        if indexing_service is None:
-            return []
-        iter_files = getattr(indexing_service, "iter_manifest_files", None)
-        if not callable(iter_files):
-            return []
-        out: list[AdminIndexFileInfo] = []
-        for file_key, file_record in list(iter_files()):  # type: ignore[union-attr]
-            if not isinstance(file_key, str) or "\x00" not in file_key:
-                continue
-            root, _, file_path = file_key.partition("\x00")
-            if not root or not file_path:
-                continue
-            chunk_count = (
-                len(getattr(file_record, "chunk_ids", []) or [])
-                if file_record is not None
-                else 0
-            )
-            has_summary_embedding = bool(
-                chunk_count
-                and getattr(indexing_service, "file_has_summary_embedding", None)
-                is not None
-                and bool(
-                    indexing_service.file_has_summary_embedding(root, file_path)
-                )
-            )
-            out.append(
-                AdminIndexFileInfo(
-                    root=root,
-                    file_path=file_path,
-                    chunk_count=chunk_count,
-                    language=_language_for(file_path),
-                    last_indexed_at=_as_iso_string(
-                        getattr(file_record, "last_indexed_at", None)
-                    ),
-                    has_summary_embedding=has_summary_embedding,
-                )
-            )
-        return out
-
-    @staticmethod
-    def _safe_manifest_status(indexing_service: Any) -> dict[str, Any]:
-        """Return the manifest status dict, or an empty stub if unavailable."""
-        if indexing_service is None:
-            return {"roots": {}, "total_files": 0}
-        manifest = getattr(indexing_service, "_manifest", None)
-        if manifest is None or not hasattr(manifest, "get_status"):
-            return {"roots": {}, "total_files": 0}
-        try:
-            return manifest.get_status()
-        except Exception:
-            return {"roots": {}, "total_files": 0}
-
-    @staticmethod
-    def _safe_indexing_status(indexing_service: Any) -> dict[str, Any]:
-        """Return the indexing-service status dict, or an empty stub."""
-        if indexing_service is None or not hasattr(indexing_service, "status"):
-            return {"roots": [], "total_chunks": 0}
-        try:
-            return indexing_service.status()
-        except Exception:
-            return {"roots": [], "total_chunks": 0}
-
-    @staticmethod
-    def _watcher_is_active(watch_service: Any, root: str) -> bool:
-        """Return ``True`` if *watch_service* is actively watching *root*.
-
-        The manifest's ``RootManifest.watching`` field is currently
-        only ever the dataclass default — :class:`WatchService` is
-        the actual source of truth and must be consulted directly.
-        Returns ``False`` when *watch_service* is ``None`` or does
-        not expose :meth:`WatchService.is_watching`.
-        """
-        if watch_service is None or not hasattr(watch_service, "is_watching"):
-            return False
-        try:
-            return bool(watch_service.is_watching(root))
-        except Exception:
-            return False
-
-    @staticmethod
-    def _collect_roots(
-        *,
-        manifest_status: dict[str, Any],
-        indexing_status: dict[str, Any],
-        job_service: Any,
-        watch_service: Any | None,
-    ) -> list[AdminIndexRootInfo]:
-        """Assemble the per-root rows for :class:`AdminIndexOverviewResponse`.
-
-        The manifest is the primary source — it carries the per-root
-        ``file_count`` and ``chunk_count``.  Roots that have only ever
-        run a sync without populating the manifest are surfaced from
-        the indexing-service status (the same fallback the previous
-        implementation used) so the overview never silently drops a
-        root the operator has interacted with.
-        """
-        roots: list[AdminIndexRootInfo] = []
-        seen: set[str] = set()
-
-        raw_roots = manifest_status.get("roots", {}) or {}
-        for root_name, root_info in raw_roots.items():
-            if not isinstance(root_name, str):
-                continue
-            info = root_info if isinstance(root_info, dict) else {}
-            roots.append(
-                AdminIndexRootInfo(
-                    root=root_name,
-                    total_files=int(info.get("file_count", 0) or 0),
-                    total_chunks=int(info.get("chunk_count", 0) or 0),
-                    watcher_active=AdminService._watcher_is_active(
-                        watch_service, root_name
-                    ),
-                    last_job_id=AdminService._latest_job_for_root(
-                        job_service=job_service, root=root_name
-                    ),
-                )
-            )
-            seen.add(root_name)
-
-        for root_info in indexing_status.get("roots", []) or []:
-            if not isinstance(root_info, dict):
-                continue
-            root_name = root_info.get("root_path")
-            if not isinstance(root_name, str) or not root_name or root_name in seen:
-                continue
-            roots.append(
-                AdminIndexRootInfo(
-                    root=root_name,
-                    total_files=0,
-                    total_chunks=int(root_info.get("chunk_count", 0) or 0),
-                    watcher_active=AdminService._watcher_is_active(
-                        watch_service, root_name
-                    ),
-                    last_job_id=AdminService._latest_job_for_root(
-                        job_service=job_service, root=root_name
-                    ),
-                )
-            )
-            seen.add(root_name)
-
-        return roots
-
-    @staticmethod
-    def _total_files(
-        indexing_service: Any, manifest_status: dict[str, Any]
-    ) -> int:
-        """Return the file count, preferring the manifest and falling back to the corpus."""
-        manifest_total = int(manifest_status.get("total_files", 0) or 0)
-        if manifest_total:
-            return manifest_total
-        if indexing_service is None or not hasattr(indexing_service, "_corpus"):
-            return 0
-        corpus = getattr(indexing_service, "_corpus", None)
-        if corpus is None or not hasattr(corpus, "get_status"):
-            return 0
-        try:
-            corpus_status = corpus.get_status()
-        except Exception:
-            return 0
-        return int(corpus_status.get("total_files", 0) or 0)
-
-    @staticmethod
-    def _total_chunks(
-        indexing_service: Any,
-        indexing_status: dict[str, Any],
-        roots: list[AdminIndexRootInfo],
-    ) -> int:
-        """Return the chunk count, preferring the corpus and falling back to per-root sum."""
-        corpus_total = int(indexing_status.get("total_chunks", 0) or 0)
-        if corpus_total:
-            return corpus_total
-        if indexing_service is None or not hasattr(indexing_service, "_corpus"):
-            return sum(root.total_chunks for root in roots)
-        corpus = getattr(indexing_service, "_corpus", None)
-        if corpus is None or not hasattr(corpus, "get_status"):
-            return sum(root.total_chunks for root in roots)
-        try:
-            corpus_status = corpus.get_status()
-        except Exception:
-            return sum(root.total_chunks for root in roots)
-        return int(corpus_status.get("total_chunks", 0) or 0)
-
-
 # ---------------------------------------------------------------------------
 # Module-level helpers (reused by other services in future tasks)
 # ---------------------------------------------------------------------------
@@ -2103,18 +1738,6 @@ def _extract_ttl_expires_at(metadata: dict[str, Any] | None) -> str | None:
         return None
     value = metadata.get("ttl_expires_at")
     return value if isinstance(value, str) else None
-
-
-def _language_for(file_path: str) -> str | None:
-    """Map *file_path* to its detected language, or ``None`` when unsupported.
-
-    Delegates to :meth:`FileScanner.language_for` so the admin
-    overview surfaces the same language label the scanner uses
-    during indexing.  Keeping this a thin wrapper avoids duplicating
-    the extension-to-language mapping and lets the mapping evolve in
-    one place.
-    """
-    return FileScanner.language_for(file_path)
 
 
 __all__ = [

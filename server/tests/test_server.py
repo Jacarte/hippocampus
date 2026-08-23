@@ -1987,6 +1987,7 @@ REMOVED_INDEX_REQUESTS = (
     ("POST", "/index/watch/stop"),
     ("GET", "/index/status"),
     ("POST", "/index/reset"),
+    ("GET", "/admin/index/overview"),
 )
 
 REMOVED_INDEX_PATHS = {
@@ -1997,6 +1998,7 @@ REMOVED_INDEX_PATHS = {
     "/index/watch/stop",
     "/index/status",
     "/index/reset",
+    "/admin/index/overview",
 }
 
 REMOVED_INDEX_REQUEST_SCHEMAS = {
@@ -2004,6 +2006,12 @@ REMOVED_INDEX_REQUEST_SCHEMAS = {
     "WatchStartRequest",
     "WatchStopRequest",
     "IndexResetRequest",
+    "AdminIndexRootInfo",
+    "AdminIndexJobInfo",
+    "AdminIndexFileInfo",
+    "AdminIndexLimits",
+    "AdminIndexVisibilityInputs",
+    "AdminIndexOverviewResponse",
 }
 
 
@@ -2104,7 +2112,10 @@ def test_unified_query_omits_user_id_when_not_provided(monkeypatch):
     )
 
 
-def test_initialize_memory_propagates_to_indexing_service(monkeypatch: MonkeyPatch):
+def test_initialize_memory_sets_runtime_state_without_indexing_service(
+    monkeypatch: MonkeyPatch,
+):
+    """Initialization stores memory state without an indexing handoff."""
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     server = importlib.import_module("server")
@@ -2116,7 +2127,7 @@ def test_initialize_memory_propagates_to_indexing_service(monkeypatch: MonkeyPat
 
     app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
 
-    assert app.state.indexing_service._memory is None
+    assert not hasattr(app.state, "indexing_service")
 
     config = {
         "version": "v1.1",
@@ -2127,5 +2138,5 @@ def test_initialize_memory_propagates_to_indexing_service(monkeypatch: MonkeyPat
     }
     server.initialize_memory(app, config=config)
 
-    assert app.state.indexing_service._memory is app.state.memory
-    assert isinstance(app.state.indexing_service._memory, FakeMemory)
+    assert isinstance(app.state.memory, FakeMemory)
+    assert app.state.memory_config == config

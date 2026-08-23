@@ -8,10 +8,9 @@ route through the helpers in this module so that:
 * The 2.0.0 access path is declared in one location and can be changed
   in one location if a future mem0 release renames / restructures these
   attributes.
-* Direct SDK-internal access is removed from
-  ``server/services/summary_service.py`` and
-  ``server/services/query_service.py`` — the only two service files that
-  need to call the LLM and embedder through the mem0 ``Memory`` object.
+* ``server/services/query_service.py`` uses the embedding helper instead of
+  reaching into the mem0 ``Memory`` object directly.  The LLM helper remains
+  available for callers that need the same compatibility boundary.
 * Failures (e.g. a future mem0 release removes ``.llm`` / ``.embedding_model``
   entirely) produce a clear, descriptive ``AttributeError`` that pinpoints
   the missing attribute and the helper that needed it, rather than a
@@ -38,11 +37,9 @@ _EMBEDDING_ATTR: str = "embedding_model"
 _LLM_METHOD: str = "generate_response"
 
 # The 2.0.0 embedder exposes an ``.embed(text, memory_action=...)`` method.
-# The ``memory_action`` kwarg defaults to ``"add"`` in the server's call site
-# (the summary-indexing path).  The query-embedding path uses the same method
-# with no ``memory_action`` because mem0's API treats the default as
-# "add"-equivalent for one-shot embedding; we still pass through any
-# caller-supplied kwargs verbatim.
+# The helper defaults ``memory_action`` to ``"add"`` for compatibility with
+# mem0's write-oriented call shape.  Query retrieval explicitly passes
+# ``None``, causing the helper to omit that keyword argument.
 _EMBED_METHOD: str = "embed"
 
 
@@ -115,9 +112,8 @@ def generate_response(memory_instance: Any, *, messages: list[dict[str, Any]]) -
     """Generate an LLM chat-completion response through a mem0 Memory instance.
 
     Encapsulates the verified mem0 2.0.0 access path
-    ``memory_instance.llm.generate_response(messages=...)``.  All summary
-    generation in :mod:`server.services.summary_service` MUST go through
-    this helper rather than reaching into ``memory_instance.llm`` directly.
+    ``memory_instance.llm.generate_response(messages=...)``.  Callers use this
+    helper rather than reaching into ``memory_instance.llm`` directly.
 
     Args:
         memory_instance: A mem0 ``Memory`` instance that exposes ``.llm``
@@ -134,9 +130,8 @@ def generate_response(memory_instance: Any, *, messages: list[dict[str, Any]]) -
         AttributeError: If ``memory_instance.llm`` or the
             ``generate_response`` method is unavailable — fail fast with
             a descriptive message.
-        Exception: Anything raised by the underlying mem0 / LLM client
-            is propagated unchanged.  The caller (``SummaryService``)
-            catches and logs it as a non-fatal summary failure.
+        Exception: Anything raised by the underlying mem0 / LLM client is
+            propagated unchanged for the caller to handle.
     """
     llm = _resolve_attr(memory_instance, _LLM_ATTR, kind="LLM client")
     method = _resolve_method(llm, _LLM_METHOD, owner="LLM client")
@@ -153,13 +148,9 @@ def embed(
 
     Encapsulates the verified mem0 2.0.0 access path
     ``memory_instance.embedding_model.embed(text, memory_action=...)``.
-    Used by:
-
-    * :mod:`server.services.summary_service` (summary index embeddings,
-      ``memory_action="add"`` by default).
-    * :mod:`server.services.query_service` (query-time embeddings, with
-      ``memory_action=None`` because the mem0 2.0.0 one-shot query path
-      does not require a memory action).
+    Used by :mod:`server.services.query_service` for query-time embeddings,
+    with ``memory_action=None`` because the mem0 2.0.0 one-shot query path
+    does not require a memory action.
 
     Args:
         memory_instance: A mem0 ``Memory`` instance that exposes
@@ -173,20 +164,17 @@ def embed(
             uses its own default behaviour.
 
     Returns:
-        The raw embedding result from the mem0 embedder.  The summary
-        service converts this to ``list[float]``; the query service
-        uses it as a list of floats directly.  ``None`` is a possible
-        return value and callers MUST treat it as "no embedding
-        available".
+        The raw embedding result from the mem0 embedder.  The query service
+        uses it as a list of floats directly.  ``None`` is a possible return
+        value and callers must treat it as "no embedding available".
 
     Raises:
         AttributeError: If ``memory_instance.embedding_model`` or the
             ``embed`` method is unavailable — fail fast with a
             descriptive message.
-        Exception: Anything raised by the underlying mem0 / embedder
-            client is propagated unchanged.  Both callers catch and
-            degrade gracefully (summary -> empty result, query ->
-            lexical-only fallback).
+        Exception: Anything raised by the underlying mem0 / embedder client
+            is propagated unchanged.  Query retrieval catches the failure and
+            falls back to lexical-only results.
     """
     embedder = _resolve_attr(memory_instance, _EMBEDDING_ATTR, kind="embedder")
     method = _resolve_method(embedder, _EMBED_METHOD, owner="embedder")

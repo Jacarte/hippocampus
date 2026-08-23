@@ -26,15 +26,10 @@ from api_models import (
 )
 from services.admin_service import AdminService
 from services.anchor_service import AnchorService
-from services.background_job_service import BackgroundJobService
 from services.file_corpus_service import FileCorpusService
-from services.file_scanner import FileScanner
-from services.index_manifest_service import IndexManifestService
-from services.indexing_service import IndexingService
 from services.memory_service import MemoryService
 from services.query_service import QueryService
 from services.retrieval_service import RetrievalService
-from services.watch_service import WatchService
 from services.runtime import (
     MemoryFactory,
     get_memory_instance,
@@ -74,22 +69,11 @@ def create_app(
         anchor_service=AnchorService(),
     )
     _corpus = FileCorpusService()
-    _manifest = IndexManifestService()
-    _scanner = FileScanner()
     _retrieval = RetrievalService()
-    app.state.indexing_service = IndexingService(
-        corpus=_corpus,
-        manifest=_manifest,
-        scanner=_scanner,
-    )
     app.state.query_service = QueryService(
         corpus=_corpus,
         retrieval_service=_retrieval,
     )
-    app.state.watch_service = WatchService(
-        indexing_service=app.state.indexing_service,
-    )
-    app.state.job_service = BackgroundJobService(max_workers=20)
     app.state.admin_service = AdminService()
 
     @app.middleware("http")
@@ -160,10 +144,6 @@ def create_app(
         @app.on_event("startup")
         def startup_initialize_memory() -> None:
             initialize_memory(app)
-
-    @app.on_event("shutdown")
-    def shutdown_job_service() -> None:
-        app.state.job_service.shutdown(wait=False)
 
     @app.get("/", summary="Redirect to documentation", include_in_schema=False)
     def home() -> RedirectResponse:
@@ -671,30 +651,6 @@ def create_app(
             lambda: request.app.state.admin_service.record_visit(
                 memory_instance, memory_id, payload.reason
             ),
-        )
-
-    @app.get("/admin/index/overview", summary="Admin index overview")
-    def admin_index_overview(request: Request) -> dict[str, Any]:
-        """Return an aggregated snapshot of current server-known index state.
-
-        Mirrors the :class:`AdminIndexOverviewResponse` contract — roots,
-        jobs, files, limits (always ``current_process_state_only: true``
-        in v1), and raw visibility/decay inputs for the CMS.
-
-        The response carries the full background-job tail and per-file
-        metadata needed for the CMS's visibility-style UI. Its data comes
-        from process-local services and is not persisted across restarts.
-
-        Returns:
-            An :class:`AdminIndexOverviewResponse`-compatible dict.
-        """
-        return _execute_service_call(
-            "admin_index_overview",
-            lambda: request.app.state.admin_service.index_overview(
-                indexing_service=request.app.state.indexing_service,
-                job_service=request.app.state.job_service,
-                watch_service=request.app.state.watch_service,
-            ).model_dump(),
         )
 
     return app

@@ -172,13 +172,23 @@ def _is_sensitive_config_key(key: str) -> bool:
 
 
 def initialize_memory(app: FastAPI, config: dict[str, Any] | None = None) -> Any:
+    """Build a mem0 instance and install it as the application's runtime state.
+
+    A non-empty explicit *config* takes precedence; ``None`` or an empty dict
+    reloads configuration from the environment.  The function updates only
+    ``app.state.memory`` and ``app.state.memory_config``.  File-corpus query
+    state is independent and is neither replaced nor mutated.
+
+    Returns:
+        The initialized memory instance stored on the application.
+
+    Raises:
+        RuntimeError: If configuration validation or memory construction fails.
+    """
     resolved_config = config or get_config_from_env()
     memory_instance = build_memory_instance(resolved_config, app.state.memory_factory)
     app.state.memory = memory_instance
     app.state.memory_config = resolved_config
-    indexing_service = getattr(app.state, "indexing_service", None)
-    if indexing_service is not None and hasattr(indexing_service, "set_memory_instance"):
-        indexing_service.set_memory_instance(memory_instance)
     return memory_instance
 
 

@@ -560,7 +560,7 @@ def test_admin_service_list_exposes_separate_popularity_and_freshness_blocks():
 
 
 # ---------------------------------------------------------------------------
-# AdminService: thin placeholders for the full CRUD/index surface
+# AdminService: thin placeholders for the full CRUD surface
 # ---------------------------------------------------------------------------
 
 
@@ -568,7 +568,7 @@ def test_admin_service_exposes_thin_placeholder_methods():
     """All required method seams must exist with the expected signatures.
 
     The plan calls for thin placeholders over existing services for
-    list/detail/create/update/delete/copy/visit/index.  We assert each
+    list/detail/create/update/delete/copy/visit.  We assert each
     method exists and is callable on a constructed service.
     """
     service = _make_admin_service()
@@ -581,7 +581,6 @@ def test_admin_service_exposes_thin_placeholder_methods():
         "delete_memory",
         "copy_memory",
         "record_visit",
-        "index_overview",
     ):
         assert hasattr(service, method_name), f"missing method: {method_name}"
         assert callable(getattr(service, method_name)), (
@@ -1187,255 +1186,6 @@ def test_admin_service_fallback_row_synthesizes_memory_id_and_metadata():
         "metadata.decay_half_life_days must be synthesized from the "
         "top-level payload decay_half_life_days"
     )
-
-
-def test_admin_service_index_overview_returns_contract_shape():
-    service = _make_admin_service()
-    indexing_service = MagicMock()
-    indexing_service.status.return_value = {"roots": [], "total_chunks": 0}
-    indexing_service._manifest.get_status.return_value = {"roots": {}, "total_files": 0}
-    job_service = MagicMock()
-    job_service.list_jobs.return_value = []
-
-    response = service.index_overview(indexing_service, job_service)
-    assert hasattr(response, "roots")
-    assert hasattr(response, "jobs")
-    assert hasattr(response, "files")
-    assert hasattr(response, "limits")
-    assert hasattr(response, "visibility_inputs")
-    assert response.limits.current_process_state_only is True
-
-
-def test_admin_service_index_overview_empty_state_is_truthful():
-    """With no manifest, no corpus, no watcher, and no jobs, the
-    overview must surface an empty-but-valid response with
-    ``current_process_state_only=True`` rather than fabricating
-    data.  Locks the plan MUST-NOT "Do not imply durable persisted
-    history" at the service layer so a future refactor of
-    :meth:`AdminService.index_overview` cannot drift back to
-    optimistic defaults.
-    """
-    service = _make_admin_service()
-    indexing_service = MagicMock()
-    indexing_service.status.return_value = {"roots": [], "total_chunks": 0}
-    indexing_service._manifest.get_status.return_value = {"roots": {}, "total_files": 0}
-    indexing_service.iter_manifest_files.return_value = []
-    indexing_service._corpus.get_status.return_value = {"total_chunks": 0, "total_files": 0}
-    job_service = MagicMock()
-    job_service.list_jobs.return_value = []
-    watch_service = MagicMock()
-    watch_service.is_watching.return_value = False
-
-    response = service.index_overview(
-        indexing_service=indexing_service,
-        job_service=job_service,
-        watch_service=watch_service,
-    )
-
-    assert response.roots == []
-    assert response.jobs == []
-    assert response.files == []
-    assert response.limits.current_process_state_only is True
-    assert response.visibility_inputs.root_count == 0
-    assert response.visibility_inputs.file_count == 0
-    assert response.visibility_inputs.chunk_count == 0
-    assert response.visibility_inputs.generated_at.endswith("Z")
-
-
-def test_admin_service_index_overview_aggregates_real_services():
-    """With a real :class:`IndexManifestService` and
-    :class:`FileCorpusService` populated as if a sync had completed,
-    the overview must surface truthful roots/files/jobs state —
-    ``language`` from :meth:`FileScanner.language_for`,
-    ``has_summary_embedding`` from the live corpus, and
-    ``watcher_active`` from the live :class:`WatchService`.  Locks
-    the contract at the service layer so the HTTP-level tests
-    (test_admin_routes.py) only need to verify the wire shape.
-    """
-    from services.file_corpus_service import FileCorpusService
-    from services.file_scanner import FileScanner
-    from services.index_manifest_service import IndexManifestService
-    from services.indexing_service import IndexingService
-    from services.background_job_service import BackgroundJobService
-    from services.watch_service import WatchService
-
-    corpus = FileCorpusService()
-    manifest = IndexManifestService()
-    scanner = FileScanner()
-    indexing_service = IndexingService(
-        corpus=corpus, manifest=manifest, scanner=scanner
-    )
-    job_service = BackgroundJobService(max_workers=1)
-
-    sync_root = "/srv/repo"
-    py_path = "src/main.py"
-    md_path = "README.md"
-    indexing_service._manifest.update_file(
-        root=sync_root, file_path=py_path, fingerprint="fp-py", chunk_ids=["c1", "c2"]
-    )
-    indexing_service._manifest.update_file(
-        root=sync_root, file_path=md_path, fingerprint="fp-md", chunk_ids=["c3"]
-    )
-    indexing_service._corpus.upsert_chunks(
-        sync_root,
-        py_path,
-        [
-            {"id": "c1", "content": "def hello(): pass", "summary_embedding": [0.1]},
-            {"id": "c2", "content": "def world(): pass"},
-        ],
-    )
-    indexing_service._corpus.upsert_chunks(
-        sync_root, md_path, [{"id": "c3", "content": "# README"}]
-    )
-
-    job_id = job_service.submit(
-        lambda: {
-            "root": sync_root,
-            "files_indexed": 0,
-            "chunks_indexed": 0,
-            "synced_at": "1970-01-01T00:00:00Z",
-            "errors": [],
-        }
-    )
-
-    watch_service = MagicMock()
-    watch_service.is_watching.side_effect = lambda r: r == sync_root
-
-    service = _make_admin_service()
-    response = service.index_overview(
-        indexing_service=indexing_service,
-        job_service=job_service,
-        watch_service=watch_service,
-    )
-
-    assert len(response.roots) == 1
-    root_row = response.roots[0]
-    assert root_row.root == sync_root
-    assert root_row.total_files == 2
-    assert root_row.total_chunks == 3
-    assert root_row.watcher_active is True
-    assert root_row.last_job_id == job_id
-
-    files_by_path = {f.file_path: f for f in response.files}
-    assert files_by_path[py_path].language == "python"
-    assert files_by_path[py_path].has_summary_embedding is True
-    assert files_by_path[md_path].language == "markdown"
-    assert files_by_path[md_path].has_summary_embedding is False
-
-    job_ids = [j.job_id for j in response.jobs]
-    assert job_id in job_ids
-    assert response.visibility_inputs.root_count == 1
-    assert response.visibility_inputs.file_count == 2
-    assert response.visibility_inputs.chunk_count == 3
-
-
-def test_admin_service_index_overview_uses_watcher_for_watcher_active():
-    """``watcher_active`` must be sourced from
-    :meth:`WatchService.is_watching` rather than the manifest's
-    ``RootManifest.watching`` field (which is a dataclass default
-    and not a reliable source).  A bare manifest with no watcher
-    service must report ``watcher_active=False`` for every root.
-    """
-    service = _make_admin_service()
-    indexing_service = MagicMock()
-    indexing_service.status.return_value = {
-        "roots": [
-            {
-                "root_path": "/srv/a",
-                "indexed_at": "1970-01-01T00:00:00Z",
-                "file_count": 1,
-                "chunk_count": 1,
-                "watching": True,
-            }
-        ],
-        "total_chunks": 1,
-    }
-    indexing_service._manifest.get_status.return_value = {
-        "roots": {
-            "/srv/a": {
-                "root_path": "/srv/a",
-                "indexed_at": "1970-01-01T00:00:00Z",
-                "file_count": 1,
-                "chunk_count": 1,
-                "watching": True,
-            }
-        },
-        "total_files": 1,
-    }
-    indexing_service.iter_manifest_files.return_value = []
-    indexing_service._corpus.get_status.return_value = {"total_chunks": 0, "total_files": 0}
-    job_service = MagicMock()
-    job_service.list_jobs.return_value = []
-
-    watch_service = MagicMock()
-    watch_service.is_watching.return_value = False
-    response = service.index_overview(
-        indexing_service=indexing_service,
-        job_service=job_service,
-        watch_service=watch_service,
-    )
-
-    assert len(response.roots) == 1
-    # Manifest's watching=True is ignored; the live watch service wins.
-    assert response.roots[0].watcher_active is False
-
-
-def test_admin_service_index_overview_handles_no_watch_service():
-    """When no watch service is provided, the overview must
-    default ``watcher_active`` to ``False`` and still surface all
-    the other fields truthfully.
-    """
-    service = _make_admin_service()
-    indexing_service = MagicMock()
-    indexing_service.status.return_value = {"roots": [], "total_chunks": 0}
-    indexing_service._manifest.get_status.return_value = {
-        "roots": {
-            "/srv/a": {
-                "root_path": "/srv/a",
-                "indexed_at": "1970-01-01T00:00:00Z",
-                "file_count": 1,
-                "chunk_count": 1,
-                "watching": False,
-            }
-        },
-        "total_files": 1,
-    }
-    indexing_service.iter_manifest_files.return_value = []
-    indexing_service._corpus.get_status.return_value = {"total_chunks": 0, "total_files": 0}
-    job_service = MagicMock()
-    job_service.list_jobs.return_value = []
-
-    response = service.index_overview(
-        indexing_service=indexing_service, job_service=job_service, watch_service=None
-    )
-    assert response.roots[0].watcher_active is False
-
-
-def test_admin_service_index_overview_falls_back_to_corpus_for_totals():
-    """When the manifest is empty but the corpus has chunks, the
-    ``visibility_inputs.chunk_count`` must come from the corpus
-    status rather than defaulting to 0.  This is the contracted
-    fall-back path for processes that have called ``sync`` without
-    materialising per-file manifest records yet.
-    """
-    service = _make_admin_service()
-    indexing_service = MagicMock()
-    indexing_service.status.return_value = {"roots": [], "total_chunks": 0}
-    indexing_service._manifest.get_status.return_value = {"roots": {}, "total_files": 0}
-    indexing_service.iter_manifest_files.return_value = []
-    indexing_service._corpus.get_status.return_value = {
-        "total_chunks": 7,
-        "total_files": 3,
-        "roots": {"/srv/edge": 7},
-    }
-    job_service = MagicMock()
-    job_service.list_jobs.return_value = []
-
-    response = service.index_overview(
-        indexing_service=indexing_service, job_service=job_service, watch_service=None
-    )
-    assert response.visibility_inputs.file_count == 3
-    assert response.visibility_inputs.chunk_count == 7
 
 
 def test_admin_service_health_payload_includes_visit_db_path():

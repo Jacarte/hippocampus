@@ -371,20 +371,19 @@ def test_chunk_memory_disabled_returns_lexical_only() -> None:
 
 
 def test_chunk_memory_enabled_includes_summary_matched_chunks() -> None:
-    """With chunk_memory_enabled=True, chunks matching via summary_embedding are included."""
+    """Enabled chunk memory retrieves a lexical miss via summary embedding."""
     corpus = _make_corpus_with_summaries()
     retrieval = FakeRetrieval([])
     svc = QueryService(corpus=corpus, retrieval_service=retrieval)
 
     result = svc.query(
-        "irrelevant content",
+        "authentication",
         corpora=["file_corpus"],
         chunk_memory_enabled=True,
         query_embedding=[1.0, 0.0, 0.0],
     )
 
-    symbol_names = [h["symbol_name"] for h in result["hits"]]
-    assert "fn_with_summary" in symbol_names
+    assert [hit["symbol_name"] for hit in result["hits"]] == ["fn_with_summary"]
 
 
 def test_chunk_memory_mixed_corpus_no_crash() -> None:

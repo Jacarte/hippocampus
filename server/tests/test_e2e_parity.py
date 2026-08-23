@@ -29,6 +29,28 @@ def _make_app(monkeypatch: MonkeyPatch) -> Any:
     return server.create_app(memory_factory=FakeMemory, startup_enabled=False)
 
 
+def _populate_file_corpus(app: Any) -> None:
+    """Load deterministic fixture chunks without an indexing control plane."""
+    corpus = app.state.query_service._corpus
+    for relative_path, language, content in (
+        (
+            "src/parser.py",
+            "python",
+            'def count_tokens(text: str) -> int: return len(text.split())',
+        ),
+        (
+            "docs/architecture.md",
+            "markdown",
+            "FileCorpusService stores prepared chunks for QueryService retrieval.",
+        ),
+    ):
+        corpus.upsert_chunks(
+            root=_FIXTURES_ROOT,
+            file_path=relative_path,
+            chunks=[{"content": content, "language": language}],
+        )
+
+
 def _requests_fake_post(client: TestClient):
     def fake_post(url: str, json: dict, timeout: int = 30):  # noqa: A002
         path = urlparse(url).path
@@ -116,7 +138,7 @@ class TestQueryParity:
         from services.mcp_bridge import handle_request
 
         app = _make_app(monkeypatch)
-        app.state.indexing_service.sync(_FIXTURES_ROOT)
+        _populate_file_corpus(app)
         with TestClient(app) as client:
             http_hits = client.post(
                 "/query",
@@ -147,7 +169,7 @@ class TestQueryParity:
         from services.mcp_bridge import handle_request
 
         app = _make_app(monkeypatch)
-        app.state.indexing_service.sync(_FIXTURES_ROOT)
+        _populate_file_corpus(app)
         with TestClient(app) as client:
             http_hits = client.post(
                 "/query",
@@ -182,7 +204,7 @@ class TestQueryParity:
         from services.mcp_bridge import handle_request
 
         app = _make_app(monkeypatch)
-        app.state.indexing_service.sync(_FIXTURES_ROOT)
+        _populate_file_corpus(app)
         with TestClient(app) as client:
             http_paths = {
                 h["path"]

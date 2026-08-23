@@ -2,23 +2,22 @@
 
 ## Components
 
-The system consists of three main components:
+The system consists of two main components:
 
 ### TokenParser
 
 Splits raw text into tokens using a configurable delimiter.
-Used by the pipeline to normalise_whitespace before indexing.
+Used by the pipeline to normalize whitespace before storing parsed content.
 
-### IndexingService
+### FileCorpusService
 
-Responsible for scanning directories and pushing chunks into the FileCorpusService.
+Stores pre-populated file and documentation chunks for retrieval.
 
 ## Data Flow
 
-1. Scanner walks the root directory and fingerprints files.
-2. IndexingService chunks changed files via CodeChunker or MarkdownChunker.
-3. FileCorpusService stores chunks in memory keyed by root + path + chunk_id.
-4. QueryService performs keyword search across all stored chunks.
+1. A caller supplies prepared chunks to FileCorpusService.
+2. FileCorpusService stores chunks in memory keyed by root + path + chunk_id.
+3. QueryService performs keyword search across all stored chunks.
 
 ## Configuration
 
