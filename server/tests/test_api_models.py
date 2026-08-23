@@ -32,16 +32,12 @@ from api_models import (
     CopiedFromInfo,
     CapabilitiesResponse,
     FileHit,
-    IndexResetRequest,
     IndexResetResponse,
     IndexStatusResponse,
-    IndexSyncRequest,
     IndexSyncResponse,
     MemoryHit,
     UnifiedQueryRequest,
     UnifiedQueryResponse,
-    WatchStartRequest,
-    WatchStopRequest,
 )
 
 
@@ -101,11 +97,6 @@ def test_unified_query_response_valid():
     assert resp.degradation_reasons == []
 
 
-def test_index_sync_request_valid():
-    req = IndexSyncRequest(root="/workspace")
-    assert req.root == "/workspace"
-
-
 def test_index_sync_response_valid():
     now = datetime.now(timezone.utc)
     resp = IndexSyncResponse(
@@ -119,35 +110,22 @@ def test_index_status_response_valid():
     assert resp.total_chunks == 5
 
 
-def test_index_reset_request_confirm_false_raises():
-    with pytest.raises(ValidationError):
-        IndexResetRequest(confirm=False)
-
-
-def test_index_reset_request_default_raises():
-    with pytest.raises(ValidationError):
-        IndexResetRequest()
-
-
-def test_index_reset_request_confirm_true_ok():
-    req = IndexResetRequest(confirm=True)
-    assert req.confirm is True
-
-
 def test_index_reset_response_valid():
     now = datetime.now(timezone.utc)
     resp = IndexResetResponse(files_cleared=2, chunks_cleared=8, reset_at=now)
     assert resp.files_cleared == 2
 
 
-def test_watch_start_request_valid():
-    req = WatchStartRequest(root="/workspace")
-    assert req.root == "/workspace"
+def test_removed_index_request_models_are_not_exported():
+    import api_models
 
-
-def test_watch_stop_request_valid():
-    req = WatchStopRequest(root="/workspace")
-    assert req.root == "/workspace"
+    removed_models = {
+        "IndexSyncRequest",
+        "WatchStartRequest",
+        "WatchStopRequest",
+        "IndexResetRequest",
+    }
+    assert all(not hasattr(api_models, name) for name in removed_models)
 
 
 def test_capabilities_response_valid():

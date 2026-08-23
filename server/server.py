@@ -18,15 +18,11 @@ from api_models import (
     AdminMemoryVisitRequest,
     AdminScopesResponse,
     CapabilitiesResponse,
-    IndexResetRequest,
-    IndexSyncRequest,
     MemoryCreate,
     RetrieveRequest,
     SearchRequest,
     ScopeType,
     UnifiedQueryRequest,
-    WatchStartRequest,
-    WatchStopRequest,
 )
 from services.admin_service import AdminService
 from services.anchor_service import AnchorService
@@ -326,139 +322,6 @@ def create_app(
                 min_score_memory=query_req.min_score_memory,
                 min_score_files=query_req.min_score_files,
             ),
-        )
-
-    @app.post("/index/sync", summary="Sync a root directory into the file corpus")
-    def index_sync(sync_req: IndexSyncRequest, request: Request) -> Any:
-        """Enqueue a filesystem sync of *root* and return a job record immediately.
-
-        The server reads files from its local filesystem; *root* must be a path
-        accessible to the server process, including from inside its container
-        when applicable.  The actual indexing work runs in the generic indexing
-        job pool, so this endpoint returns quickly even for large trees.  This
-        differs from a watcher, which repeatedly calls the sync service from its
-        own thread and does not create job records.
-
-        Returns:
-            A job record dict with ``job_id``.  Because submission schedules
-            work before this handler retrieves the record, ``status`` may be
-            ``queued``, ``running``, or already ``completed`` (or ``failed``
-            if execution raised an exception).
-            Poll ``GET /index/jobs/{job_id}`` for progress and errors.
-        """
-        job_id = request.app.state.job_service.submit(
-            request.app.state.indexing_service.sync,
-            sync_req.root,
-            generate_summaries=sync_req.generate_summaries,
-        )
-        return _execute_service_call(
-            "index_sync",
-            lambda: request.app.state.job_service.get_job(job_id),
-        )
-
-    @app.get("/index/jobs", summary="List background indexing jobs")
-    def index_jobs_list(request: Request, limit: int = 50) -> Any:
-        """Return the most-recent indexing jobs, newest first.
-
-        Args:
-            limit: Maximum number of records to return (default ``50``).
-
-        Returns:
-            List of job records, each with keys ``job_id``, ``status``,
-            ``queued_at``, ``started_at``, ``completed_at``, ``result``,
-            and ``errors``.
-        """
-        return _execute_service_call(
-            "index_jobs_list",
-            lambda: request.app.state.job_service.list_jobs(limit=limit),
-        )
-
-    @app.get("/index/jobs/{job_id}", summary="Get status of a background indexing job")
-    def index_job_get(job_id: str, request: Request) -> Any:
-        """Return the job record for *job_id*, or raise 404 if not found.
-
-        Args:
-            job_id: UUID string returned by ``POST /index/sync``.
-
-        Returns:
-            Job dict with keys ``job_id``, ``status``, ``queued_at``,
-            ``started_at``, ``completed_at``, ``result``, and ``errors``.
-
-        Raises:
-            HTTPException: 404 when *job_id* is not recognised.
-        """
-        def _get() -> dict:
-            record = request.app.state.job_service.get_job(job_id)
-            if record is None:
-                raise HTTPException(status_code=404, detail=f"Job {job_id!r} not found")
-            return record
-        return _execute_service_call("index_job_get", _get)
-
-    @app.post("/index/watch/start", summary="Start watching a root directory")
-    def index_watch_start(watch_req: WatchStartRequest, request: Request) -> dict[str, Any]:
-        """Start periodic server-side syncs for a server-accessible root.
-
-        Watcher syncs run in a dedicated thread rather than through the indexing
-        job queue, so they do not appear in ``GET /index/jobs`` or contribute to
-        ``GET /index/status`` recent job errors.  Starting an already watched
-        root is a no-op and still returns ``watching=True``.
-        """
-        return _execute_service_call(
-            "index_watch_start",
-            lambda: (
-                request.app.state.watch_service.start(
-                    watch_req.root,
-                    generate_summaries=watch_req.generate_summaries,
-                ),
-                {"root": watch_req.root, "watching": True},
-            )[-1],
-        )
-
-    @app.post("/index/watch/stop", summary="Stop watching a root directory")
-    def index_watch_stop(watch_req: WatchStopRequest, request: Request) -> dict[str, Any]:
-        """Stop periodic syncs for *root* without changing indexed data.
-
-        Stopping a root that is not watched is a no-op.  In either case the
-        endpoint returns ``watching=False``; use reset separately to clear the
-        corpus and manifest.
-        """
-        return _execute_service_call(
-            "index_watch_stop",
-            lambda: (
-                request.app.state.watch_service.stop(watch_req.root),
-                {"root": watch_req.root, "watching": False},
-            )[-1],
-        )
-
-    @app.get("/index/status", summary="Get file corpus index status")
-    def index_status(request: Request) -> Any:
-        """Return current corpus totals, root summaries, and recent job errors.
-
-        This is a point-in-time operational summary, not a job-progress or
-        watcher-lifecycle endpoint.  Poll ``GET /index/jobs/{job_id}`` for one
-        queued sync, and use the watcher start/stop endpoints to control periodic
-        syncs.  Empty state is represented by zero totals and an empty root list.
-        """
-        return _execute_service_call(
-            "index_status",
-            lambda: {
-                **request.app.state.indexing_service.status(),
-                "recent_errors": request.app.state.job_service.recent_errors(),
-            },
-        )
-
-    @app.post("/index/reset", summary="Reset the file corpus index")
-    def index_reset(reset_req: IndexResetRequest, request: Request) -> Any:
-        """Clear the in-memory file corpus and manifest after explicit confirmation.
-
-        Request validation requires ``confirm=True``.  Reset does not stop active
-        watchers or clear background-job history, so a watcher may repopulate the
-        index after this call.  Resetting an empty index succeeds with zero
-        ``files_cleared`` and ``chunks_cleared`` counts.
-        """
-        return _execute_service_call(
-            "index_reset",
-            lambda: request.app.state.indexing_service.reset(),
         )
 
     @app.get("/query/capabilities", summary="Describe query capabilities")
@@ -818,13 +681,9 @@ def create_app(
         jobs, files, limits (always ``current_process_state_only: true``
         in v1), and raw visibility/decay inputs for the CMS.
 
-        Contrast with ``GET /index/status``: ``/index/status`` is a
-        compact operational view that returns ``recent_errors`` and a
-        per-root summary for the indexing pipeline, whereas this
-        endpoint additionally carries the full background-job tail
-        and per-file metadata needed for the CMS's visibility-style
-        UI.  Both endpoints share the same in-memory data sources;
-        neither persists state across process restarts.
+        The response carries the full background-job tail and per-file
+        metadata needed for the CMS's visibility-style UI. Its data comes
+        from process-local services and is not persisted across restarts.
 
         Returns:
             An :class:`AdminIndexOverviewResponse`-compatible dict.

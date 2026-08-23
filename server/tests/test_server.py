@@ -1959,77 +1959,6 @@ def test_query_capabilities_route_returns_expected_shape(monkeypatch):
     assert "X-Correlation-ID" in resp.headers
 
 
-def test_index_status_route_returns_expected_shape(monkeypatch):
-    app = _make_app_no_live_deps(monkeypatch)
-    with TestClient(app) as client:
-        resp = client.get("/index/status")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert "roots" in body
-    assert "total_files" in body
-    assert "total_chunks" in body
-    assert "X-Correlation-ID" in resp.headers
-
-
-def test_index_reset_requires_confirm_true(monkeypatch):
-    app = _make_app_no_live_deps(monkeypatch)
-    with TestClient(app) as client:
-        resp = client.post("/index/reset", json={"confirm": False})
-    assert resp.status_code == 422
-
-
-def test_index_reset_succeeds_with_confirm_true(monkeypatch):
-    app = _make_app_no_live_deps(monkeypatch)
-    with TestClient(app) as client:
-        resp = client.post("/index/reset", json={"confirm": True})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert "files_cleared" in body
-    assert "chunks_cleared" in body
-    assert "reset_at" in body
-    assert "X-Correlation-ID" in resp.headers
-
-
-def test_index_watch_start_stop_round_trip(monkeypatch, tmp_path):
-    app = _make_app_no_live_deps(monkeypatch)
-    root = str(tmp_path)
-    with TestClient(app) as client:
-        start_resp = client.post("/index/watch/start", json={"root": root})
-        assert start_resp.status_code == 200
-        assert start_resp.json()["watching"] is True
-        assert start_resp.json()["root"] == root
-
-        stop_resp = client.post("/index/watch/stop", json={"root": root})
-        assert stop_resp.status_code == 200
-        assert stop_resp.json()["watching"] is False
-        assert stop_resp.json()["root"] == root
-    assert "X-Correlation-ID" in start_resp.headers
-
-
-def test_index_sync_route_returns_expected_shape(monkeypatch, tmp_path):
-    app = _make_app_no_live_deps(monkeypatch)
-    root = str(tmp_path)
-    with TestClient(app) as client:
-        resp = client.post("/index/sync", json={"root": root})
-        assert resp.status_code == 200
-        job = resp.json()
-        assert "job_id" in job
-        assert job["status"] in ("queued", "running", "completed")
-        assert "X-Correlation-ID" in resp.headers
-        job_id = job["job_id"]
-        deadline = time.time() + 10.0
-        while time.time() < deadline:
-            job = client.get(f"/index/jobs/{job_id}").json()
-            if job["status"] == "completed":
-                break
-            time.sleep(0.05)
-        result = job["result"]
-    assert result["root"] == root
-    assert "files_indexed" in result
-    assert "chunks_indexed" in result
-    assert "synced_at" in result
-
-
 def test_unified_query_route_returns_expected_shape(monkeypatch):
     app = _make_app_no_live_deps(monkeypatch)
     with TestClient(app) as client:
@@ -2050,68 +1979,68 @@ def test_unified_query_rejects_empty_query(monkeypatch):
     assert resp.status_code == 422
 
 
-# ---------------------------------------------------------------------------
-# Tests for generate_summaries field and is_chunk_memory_enabled
-# ---------------------------------------------------------------------------
+REMOVED_INDEX_REQUESTS = (
+    ("POST", "/index/sync"),
+    ("GET", "/index/jobs"),
+    ("GET", "/index/jobs/removed-job-123"),
+    ("POST", "/index/watch/start"),
+    ("POST", "/index/watch/stop"),
+    ("GET", "/index/status"),
+    ("POST", "/index/reset"),
+)
 
-def test_index_sync_accepts_generate_summaries_flag(monkeypatch):
+REMOVED_INDEX_PATHS = {
+    "/index/sync",
+    "/index/jobs",
+    "/index/jobs/{job_id}",
+    "/index/watch/start",
+    "/index/watch/stop",
+    "/index/status",
+    "/index/reset",
+}
+
+REMOVED_INDEX_REQUEST_SCHEMAS = {
+    "IndexSyncRequest",
+    "WatchStartRequest",
+    "WatchStopRequest",
+    "IndexResetRequest",
+}
+
+
+def test_removed_index_routes_return_404(monkeypatch):
     app = _make_app_no_live_deps(monkeypatch)
     with TestClient(app) as client:
-        resp = client.post("/index/sync", json={"root": "/tmp", "generate_summaries": True})
-    assert resp.status_code == 200
-
-
-def test_index_sync_legacy_payload_without_generate_summaries(monkeypatch):
-    app = _make_app_no_live_deps(monkeypatch)
-    with TestClient(app) as client:
-        resp = client.post("/index/sync", json={"root": "/tmp"})
-    assert resp.status_code == 200
-
-
-def test_index_and_query_openapi_inventory_after_cli_only_route_removal(monkeypatch):
-    app = _make_app_no_live_deps(monkeypatch)
-    removed_paths = ("/index/ingest", "/index/file")
-    with TestClient(app) as client:
-        responses = [client.post(path, json={}) for path in removed_paths]
+        responses = [
+            client.request(method, path, json={}, follow_redirects=False)
+            for method, path in REMOVED_INDEX_REQUESTS
+        ]
 
     for response in responses:
         assert response.status_code == 404
         assert response.headers["content-type"].startswith("application/json")
         assert response.json() == {"detail": "Not Found"}
 
-    openapi = app.openapi()
-    paths = openapi["paths"]
-    assert set(removed_paths).isdisjoint(paths)
 
-    expected_methods = {
-        "/query": {"post"},
-        "/index/sync": {"post"},
-        "/index/watch/start": {"post"},
-        "/index/watch/stop": {"post"},
-        "/index/status": {"get"},
-        "/index/reset": {"post"},
-        "/query/capabilities": {"get"},
-        "/index/jobs": {"get"},
-        "/index/jobs/{job_id}": {"get"},
-    }
-    for path, methods in expected_methods.items():
-        assert set(paths[path]) == methods
+def test_removed_index_routes_are_absent_from_openapi(monkeypatch):
+    app = _make_app_no_live_deps(monkeypatch)
+    assert REMOVED_INDEX_PATHS.isdisjoint(app.openapi()["paths"])
 
-    expected_request_schemas = {
-        ("/query", "post"): "#/components/schemas/UnifiedQueryRequest",
-        ("/index/sync", "post"): "#/components/schemas/IndexSyncRequest",
-        ("/index/watch/start", "post"): "#/components/schemas/WatchStartRequest",
-        ("/index/watch/stop", "post"): "#/components/schemas/WatchStopRequest",
-        ("/index/reset", "post"): "#/components/schemas/IndexResetRequest",
-    }
-    for (path, method), schema_ref in expected_request_schemas.items():
-        request_schema = paths[path][method]["requestBody"]["content"][
-            "application/json"
-        ]["schema"]
-        assert request_schema == {"$ref": schema_ref}
 
-    removed_schemas = {"FileContent", "FileIngestRequest", "FileChunksRequest"}
-    assert removed_schemas.isdisjoint(openapi["components"]["schemas"])
+def test_removed_index_schemas_are_absent_from_openapi(monkeypatch):
+    app = _make_app_no_live_deps(monkeypatch)
+    assert REMOVED_INDEX_REQUEST_SCHEMAS.isdisjoint(
+        app.openapi()["components"]["schemas"]
+    )
+
+
+def test_query_contract_remains_in_openapi(monkeypatch):
+    app = _make_app_no_live_deps(monkeypatch)
+    query_contract = app.openapi()["paths"]["/query"]
+    assert set(query_contract) == {"post"}
+    request_schema = query_contract["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]
+    assert request_schema == {"$ref": "#/components/schemas/UnifiedQueryRequest"}
 
 
 def test_use_chunk_memory_env_parsing(monkeypatch):

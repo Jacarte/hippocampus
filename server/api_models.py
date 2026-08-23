@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 
 class Message(BaseModel):
@@ -120,17 +120,6 @@ class UnifiedQueryResponse(BaseModel):
     degradation_reasons: list[str] = []
 
 
-class IndexSyncRequest(BaseModel):
-    root: str
-    generate_summaries: bool = Field(
-        default=False,
-        description=(
-            "When True, the indexing pipeline generates natural-language summaries "
-            "for each indexed chunk. Disabled by default to keep sync fast."
-        ),
-    )
-
-
 class IndexSyncResponse(BaseModel):
     root: str
     files_indexed: int
@@ -144,42 +133,10 @@ class IndexStatusResponse(BaseModel):
     total_chunks: int
 
 
-class IndexResetRequest(BaseModel):
-    confirm: bool = False
-
-    @model_validator(mode="after")
-    def require_confirm(self) -> "IndexResetRequest":
-        if not self.confirm:
-            raise ValueError("confirm must be True to reset the index")
-        return self
-
-
 class IndexResetResponse(BaseModel):
     files_cleared: int
     chunks_cleared: int
     reset_at: datetime
-
-
-class WatchStartRequest(BaseModel):
-    root: str
-    generate_summaries: bool = Field(
-        default=False,
-        description=(
-            "When True, newly detected files will have chunk summaries generated "
-            "as they are indexed by the file watcher. Disabled by default."
-        ),
-    )
-
-
-class WatchStopRequest(BaseModel):
-    root: str
-    generate_summaries: bool = Field(
-        default=False,
-        description=(
-            "Forwarded from the originating WatchStartRequest so the stop handler "
-            "can clean up any summary-generation state. Defaults to False."
-        ),
-    )
 
 
 class CapabilitiesResponse(BaseModel):

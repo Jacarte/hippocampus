@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib
 import json
 import sys
-import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -28,19 +27,6 @@ def _make_app(monkeypatch: MonkeyPatch) -> Any:
             self.config = config
 
     return server.create_app(memory_factory=FakeMemory, startup_enabled=False)
-
-
-def _sync_wait(client: Any, root: str, timeout: float = 10.0) -> None:
-    resp = client.post("/index/sync", json={"root": root})
-    assert resp.status_code == 200
-    job_id = resp.json()["job_id"]
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        job = client.get(f"/index/jobs/{job_id}").json()
-        if job["status"] == "completed":
-            return
-        time.sleep(0.05)
-    raise TimeoutError(f"sync job {job_id} did not complete within {timeout}s")
 
 
 def _requests_fake_post(client: TestClient):
@@ -99,28 +85,6 @@ def _httpx_fake_post(client: TestClient):
     return fake_post
 
 
-def _httpx_fake_get(client: TestClient):
-    def fake_get(url: str, timeout: int = 30):
-        path = urlparse(url).path
-        resp = client.get(path)
-        mock = MagicMock()
-        mock.status_code = resp.status_code
-        try:
-            mock.json.return_value = resp.json()
-        except Exception:  # noqa: BLE001
-            mock.json.return_value = {}
-        mock.text = resp.text
-        if resp.status_code >= 400:
-            import httpx
-            mock.raise_for_status.side_effect = httpx.HTTPStatusError(
-                "error", request=MagicMock(), response=mock
-            )
-        else:
-            mock.raise_for_status.return_value = None
-        return mock
-    return fake_get
-
-
 def _mcp_req(method: str, req_id: int = 1, params: dict | None = None) -> dict:
     r: dict = {"jsonrpc": "2.0", "id": req_id, "method": method}
     if params is not None:
@@ -143,72 +107,6 @@ class TestCapabilitiesStatusParity:
 
 
 
-class TestSyncParity:
-    def test_http_sync_indexes_fixture_root(self, monkeypatch: MonkeyPatch) -> None:
-        import time
-        app = _make_app(monkeypatch)
-        with TestClient(app) as client:
-            resp = client.post("/index/sync", json={"root": _FIXTURES_ROOT})
-            assert resp.status_code == 200
-            job_id = resp.json()["job_id"]
-            deadline = time.time() + 10.0
-            job_resp = None
-            while time.time() < deadline:
-                job_resp = client.get(f"/index/jobs/{job_id}")
-                if job_resp.json()["status"] == "completed":
-                    break
-                time.sleep(0.05)
-        assert job_resp is not None
-        result = job_resp.json()["result"]
-        assert result["root"] == _FIXTURES_ROOT
-        assert result["files_indexed"] >= 2
-        assert result["chunks_indexed"] >= 2
-
-
-
-class TestStatusParity:
-    def test_mcp_status_and_http_status_have_same_keys(self, monkeypatch: MonkeyPatch) -> None:
-        from services.mcp_bridge import handle_request
-
-        app = _make_app(monkeypatch)
-        with TestClient(app) as client:
-            http_body = client.get("/index/status").json()
-
-            with monkeypatch.context() as m:
-                m.setattr("services.mcp_bridge.httpx.get", _httpx_fake_get(client))
-                mcp_resp = handle_request(
-                    _mcp_req("tools/call", params={"name": "mgrep_status", "arguments": {}})
-                )
-
-        mcp_body = json.loads(mcp_resp["result"]["content"][0]["text"])
-
-        for key in ("roots", "total_files", "total_chunks"):
-            assert key in http_body, f"HTTP /index/status missing key: {key}"
-            assert key in mcp_body, f"MCP mgrep_status missing key: {key}"
-
-    def test_mcp_status_and_http_status_agree_after_sync(self, monkeypatch: MonkeyPatch) -> None:
-        from services.mcp_bridge import handle_request
-
-        app = _make_app(monkeypatch)
-        with TestClient(app) as client:
-            _sync_wait(client, _FIXTURES_ROOT)
-            http_body = client.get("/index/status").json()
-
-            with monkeypatch.context() as m:
-                m.setattr("services.mcp_bridge.httpx.get", _httpx_fake_get(client))
-                mcp_resp = handle_request(
-                    _mcp_req("tools/call", params={"name": "mgrep_status", "arguments": {}})
-                )
-
-        mcp_body = json.loads(mcp_resp["result"]["content"][0]["text"])
-
-        assert mcp_body["total_files"] == http_body["total_files"]
-        assert mcp_body["total_chunks"] == http_body["total_chunks"]
-        assert mcp_body["total_files"] >= 2
-        assert any(r.get("root_path") == _FIXTURES_ROOT for r in http_body["roots"])
-        assert any(r.get("root_path") == _FIXTURES_ROOT for r in mcp_body["roots"])
-
-
 class TestQueryParity:
     _QUERY_TERM = "count_tokens"
 
@@ -218,9 +116,8 @@ class TestQueryParity:
         from services.mcp_bridge import handle_request
 
         app = _make_app(monkeypatch)
+        app.state.indexing_service.sync(_FIXTURES_ROOT)
         with TestClient(app) as client:
-            _sync_wait(client, _FIXTURES_ROOT)
-
             http_hits = client.post(
                 "/query",
                 json={"query": self._QUERY_TERM, "corpora": ["file_corpus"]},
@@ -250,9 +147,8 @@ class TestQueryParity:
         from services.mcp_bridge import handle_request
 
         app = _make_app(monkeypatch)
+        app.state.indexing_service.sync(_FIXTURES_ROOT)
         with TestClient(app) as client:
-            _sync_wait(client, _FIXTURES_ROOT)
-
             http_hits = client.post(
                 "/query",
                 json={"query": self._QUERY_TERM, "corpora": ["file_corpus"]},
@@ -286,9 +182,8 @@ class TestQueryParity:
         from services.mcp_bridge import handle_request
 
         app = _make_app(monkeypatch)
+        app.state.indexing_service.sync(_FIXTURES_ROOT)
         with TestClient(app) as client:
-            _sync_wait(client, _FIXTURES_ROOT)
-
             http_paths = {
                 h["path"]
                 for h in client.post(

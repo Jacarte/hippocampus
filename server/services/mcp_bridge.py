@@ -48,44 +48,6 @@ TOOLS: list[dict[str, Any]] = [
             "required": ["query"],
         },
     },
-    {
-        "name": "mgrep_sync",
-        "description": "Index a directory into the file corpus so it can be searched with mgrep_query.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "root": {
-                    "type": "string",
-                    "description": "Absolute path to the root directory to index.",
-                },
-            },
-            "required": ["root"],
-        },
-    },
-    {
-        "name": "mgrep_status",
-        "description": "Return the current state of the file corpus index (roots, file count, chunk count).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
-    {
-        "name": "mgrep_reset",
-        "description": "Wipe all indexed files and chunks from the file corpus. Irreversible.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "confirm": {
-                    "type": "boolean",
-                    "description": "Must be true to proceed with the reset.",
-                    "default": False,
-                },
-            },
-            "required": ["confirm"],
-        },
-    },
 ]
 
 
@@ -99,33 +61,8 @@ def _call_query(args: dict[str, Any]) -> dict[str, Any]:
     return resp.json()
 
 
-def _call_sync(args: dict[str, Any]) -> dict[str, Any]:
-    resp = httpx.post(f"{BACKEND_URL}/index/sync", json={"root": args["root"]}, timeout=120)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def _call_status(_args: dict[str, Any]) -> dict[str, Any]:
-    resp = httpx.get(f"{BACKEND_URL}/index/status", timeout=15)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def _call_reset(args: dict[str, Any]) -> dict[str, Any]:
-    resp = httpx.post(
-        f"{BACKEND_URL}/index/reset",
-        json={"confirm": bool(args.get("confirm", False))},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    return resp.json()
-
-
 _TOOL_HANDLERS = {
     "mgrep_query": _call_query,
-    "mgrep_sync": _call_sync,
-    "mgrep_status": _call_status,
-    "mgrep_reset": _call_reset,
 }
 
 
