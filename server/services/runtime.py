@@ -178,8 +178,7 @@ def initialize_memory(app: FastAPI, config: dict[str, Any] | None = None) -> Any
     reloads configuration from the environment.  The function replaces
     ``app.state.memory`` and ``app.state.memory_config`` only after memory
     construction succeeds, so a failure leaves any existing runtime state
-    unchanged.  File-corpus query state is independent and is neither replaced
-    nor mutated.
+    unchanged.
 
     Returns:
         The initialized memory instance stored on the application.
@@ -236,15 +235,3 @@ def get_admin_runtime_options() -> dict[str, Any]:
             os.environ.get("MEM0_ADMIN_PAGE_SIZE_MAX", "100")
         ),
     }
-
-
-def is_chunk_memory_enabled() -> bool:
-    """Return True if chunk-level memory is enabled via environment variable.
-
-    Reads the ``USE_CHUNK_MEMORY`` environment variable and treats the values
-    ``"1"``, ``"true"``, and ``"yes"`` (case-insensitive) as *enabled*.  Any
-    other value—including an unset variable—is treated as *disabled* and
-    returns ``False``.
-    """
-    value = os.environ.get("USE_CHUNK_MEMORY", "").strip().lower()
-    return value in {"1", "true", "yes"}

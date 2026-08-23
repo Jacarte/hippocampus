@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
+from prometheus_client.parser import text_string_to_metric_families
 from pytest import MonkeyPatch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -116,7 +117,6 @@ def test_metrics_module_exports_all_expected_metrics() -> None:
         memory_retrieve_hits,
         query_duration_seconds,
         query_hits_count,
-        file_corpus_operations_total,
     )
 
     # Every metric exposes a .labels() method — the lowest-common-denominator
@@ -133,7 +133,6 @@ def test_metrics_module_exports_all_expected_metrics() -> None:
         memory_retrieve_hits,
         query_duration_seconds,
         query_hits_count,
-        file_corpus_operations_total,
     ):
         assert callable(metric.labels), f"Metric lacks .labels(): {metric}"
 
@@ -163,6 +162,42 @@ def test_metrics_endpoint_returns_prometheus_plaintext(
     assert "# HELP" in response.text or "# TYPE" in response.text, (
         "Expected Prometheus HELP/TYPE lines in /metrics output"
     )
+
+
+def test_query_metrics_help_text_is_memory_only(monkeypatch: MonkeyPatch) -> None:
+    """Query metric HELP text describes only the retained memory store."""
+    metrics_text = _build_client(monkeypatch).get("/metrics").text
+
+    assert (
+        "# HELP query_duration_seconds Memory-store query latency in seconds."
+        in metrics_text
+    )
+    assert (
+        "# HELP query_hits_count Number of memory-store results returned per query."
+        in metrics_text
+    )
+
+
+def test_query_metrics_emit_only_memory_store_corpus_label(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A memory query emits no alias or removed-corpus metric labels."""
+    client = _build_client(monkeypatch)
+    _configure(client)
+
+    response = client.post(
+        "/query", json={"query": "remember", "corpora": ["all"]}
+    )
+    assert response.status_code == 200
+
+    query_metric_names = ("query_duration_seconds", "query_hits_count")
+    corpus_labels = {
+        sample.labels["corpus"]
+        for family in text_string_to_metric_families(client.get("/metrics").text)
+        for sample in family.samples
+        if sample.name.startswith(query_metric_names) and "corpus" in sample.labels
+    }
+    assert corpus_labels == {"memory_store"}
 
 
 # ---------------------------------------------------------------------------
@@ -313,4 +348,3 @@ def test_retrieval_pipeline_metrics_appear_after_search(
     assert (
         'memory_retrieve_hits_total{agent_id="",user_id="user-1"}'
     ) in metrics_text, "memory_retrieve_hits not found"
-

@@ -1,18 +1,16 @@
 """Compatibility seam for mem0 SDK-internal access.
 
-This module is the *single* place in the server that touches mem0 SDK
-internal attributes (currently ``memory_instance.llm`` and
-``memory_instance.embedding_model``).  All other service-layer code MUST
+This module is the *single* place in the server that touches the mem0 SDK's
+internal ``memory_instance.llm`` attribute. All other service-layer code MUST
 route through the helpers in this module so that:
 
 * The 2.0.7 access path is declared in one location and can be changed
   in one location if a future mem0 release renames / restructures these
   attributes.
-* ``server/services/query_service.py`` uses the embedding helper instead of
-  reaching into the mem0 ``Memory`` object directly.  The LLM helper remains
-  available for callers that need the same compatibility boundary.
-* Failures (e.g. a future mem0 release removes ``.llm`` / ``.embedding_model``
-  entirely) produce a clear, descriptive ``AttributeError`` that pinpoints
+* Callers use one compatibility boundary instead of reaching into the mem0
+  ``Memory`` object directly.
+* Failures (e.g. a future mem0 release removes ``.llm`` entirely) produce a
+  clear, descriptive ``AttributeError`` that pinpoints
   the missing attribute and the helper that needed it, rather than a
   generic ``AttributeError`` raised deep inside a service.
 
@@ -30,17 +28,10 @@ from typing import Any
 # to expose.  Centralised here so the access path is declared in one place
 # and a future mem0 release can be adapted by changing a single string.
 _LLM_ATTR: str = "llm"
-_EMBEDDING_ATTR: str = "embedding_model"
 
 # The 2.0.7 LLM client exposes a ``generate_response(messages=...)`` method.
 # We keep the surface narrow: only the kwargs the server actually uses.
 _LLM_METHOD: str = "generate_response"
-
-# The 2.0.7 embedder exposes an ``.embed(text, memory_action=...)`` method.
-# The helper defaults ``memory_action`` to ``"add"`` for compatibility with
-# mem0's write-oriented call shape.  Query retrieval explicitly passes
-# ``None``, causing the helper to omit that keyword argument.
-_EMBED_METHOD: str = "embed"
 
 
 def _resolve_attr(memory_instance: Any, attr_name: str, *, kind: str) -> Any:
@@ -49,10 +40,9 @@ def _resolve_attr(memory_instance: Any, attr_name: str, *, kind: str) -> Any:
     Args:
         memory_instance: A mem0 ``Memory`` instance (or any object that
             exposes the SDK-internal attributes the server relies on).
-        attr_name: Attribute name to resolve (e.g. ``"llm"`` or
-            ``"embedding_model"``).
+        attr_name: Attribute name to resolve (for example, ``"llm"``).
         kind: Human-readable label for the missing attribute, used in
-            the error message ("LLM client" / "embedder").
+            the error message.
 
     Returns:
         The resolved attribute value.
@@ -91,8 +81,8 @@ def _resolve_method(obj: Any, method_name: str, *, owner: str) -> Any:
 
     Raises:
         AttributeError: When the expected method is missing on the
-            parent.  Fail-fast so downstream ``.embed(...)`` or
-            ``.generate_response(...)`` calls do not raise an
+            parent.  Fail-fast so downstream ``.generate_response(...)`` calls
+            do not raise an
             ambiguous ``AttributeError`` deep inside a service.
     """
     try:
@@ -136,48 +126,3 @@ def generate_response(memory_instance: Any, *, messages: list[dict[str, Any]]) -
     llm = _resolve_attr(memory_instance, _LLM_ATTR, kind="LLM client")
     method = _resolve_method(llm, _LLM_METHOD, owner="LLM client")
     return method(messages=messages)
-
-
-def embed(
-    memory_instance: Any,
-    text: str,
-    *,
-    memory_action: str | None = "add",
-) -> Any:
-    """Embed a single text string through a mem0 Memory instance.
-
-    Encapsulates the verified mem0 2.0.7 access path
-    ``memory_instance.embedding_model.embed(text, memory_action=...)``.
-    Used by :mod:`server.services.query_service` for query-time embeddings,
-    with ``memory_action=None`` because the mem0 2.0.7 one-shot query path
-    does not require a memory action.
-
-    Args:
-        memory_instance: A mem0 ``Memory`` instance that exposes
-            ``.embedding_model`` (the verified 2.0.7 access path).
-        text: The text to embed.
-        memory_action: Optional memory-action label forwarded to the
-            embedder.  The verified mem0 2.0.7 call shape accepts
-            ``memory_action="add"``; the query path can pass
-            ``memory_action=None`` to skip the kwarg entirely.  When
-            ``None`` the kwarg is omitted from the call so the embedder
-            uses its own default behaviour.
-
-    Returns:
-        The raw embedding result from the mem0 embedder.  The query service
-        uses it as a list of floats directly.  ``None`` is a possible return
-        value and callers must treat it as "no embedding available".
-
-    Raises:
-        AttributeError: If ``memory_instance.embedding_model`` or the
-            ``embed`` method is unavailable — fail fast with a
-            descriptive message.
-        Exception: Anything raised by the underlying mem0 / embedder client
-            is propagated unchanged.  Query retrieval catches the failure and
-            falls back to lexical-only results.
-    """
-    embedder = _resolve_attr(memory_instance, _EMBEDDING_ATTR, kind="embedder")
-    method = _resolve_method(embedder, _EMBED_METHOD, owner="embedder")
-    if memory_action is None:
-        return method(text)
-    return method(text, memory_action=memory_action)

@@ -285,6 +285,15 @@ def test_sdk_memory_from_config_accepts_dict() -> None:
     )
 
 
+def test_removed_embedding_compat_exports_are_absent() -> None:
+    """Only the retained LLM compatibility helper remains exported."""
+    from services import mem0_compat
+
+    assert callable(mem0_compat.generate_response)
+    for name in ("embed", "_EMBEDDING_ATTR", "_EMBED_METHOD"):
+        assert not hasattr(mem0_compat, name)
+
+
 # ===================================================================
 # Section B — End-to-end persistence probe
 # ===================================================================

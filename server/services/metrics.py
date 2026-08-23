@@ -79,31 +79,19 @@ memory_retrieve_hits: Counter = Counter(
 )
 
 # ---------------------------------------------------------------------------
-# Cross-corpus query metrics
+# Memory-store query metrics
 # ---------------------------------------------------------------------------
 
 query_duration_seconds: Histogram = Histogram(
     "query_duration_seconds",
-    "Cross-corpus query latency in seconds, partitioned by corpus. "
-    "Corpus values: memory_store, file_corpus, all.",
+    "Memory-store query latency in seconds.",
     labelnames=["corpus"],
     buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
 )
 
 query_hits_count: Histogram = Histogram(
     "query_hits_count",
-    "Number of results returned per corpus per cross-corpus query.",
+    "Number of memory-store results returned per query.",
     labelnames=["corpus"],
     buckets=[0, 1, 5, 10, 25, 50],
-)
-
-# ---------------------------------------------------------------------------
-# File corpus operation metrics
-# ---------------------------------------------------------------------------
-
-file_corpus_operations_total: Counter = Counter(
-    "file_corpus_operations_total",
-    "Total file corpus operations, partitioned by operation type "
-    "(upsert, query, delete, reset).",
-    labelnames=["operation"],
 )
