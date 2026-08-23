@@ -85,14 +85,17 @@ class FileCorpusService:
     ) -> list[dict[str, Any]]:
         """Return chunks matching *query_text*.
 
-        When *chunk_memory_enabled* is ``True`` and *query_embedding* is
-        provided, the method also performs semantic similarity search against
-        stored ``summary_embedding`` fields.  Chunks that match either path
-        are merged; where a chunk qualifies under both paths the higher score
-        is kept.  Chunks without ``summary_embedding`` are silently skipped on
-        the semantic path.  If the semantic path raises an unexpected error the
-        method logs a warning and returns the lexical-only results so callers
-        are never left empty-handed.
+        Lexical search always runs first.  Semantic search also runs when
+        *chunk_memory_enabled* is ``True`` and *query_embedding* is provided;
+        otherwise this method returns the lexical results unchanged.  Both
+        paths apply the same filters and result limit.  Chunks that match either
+        path are merged by ID, with the higher score retained for duplicate
+        matches.  Chunks without a non-empty ``summary_embedding`` are skipped
+        by the semantic path.
+
+        Unlike :meth:`query_with_summaries`, this combined query catches any
+        semantic-search error, logs a warning, and returns the lexical results.
+        The fallback may be empty when the lexical search has no matches.
         """
         file_corpus_operations_total.labels(operation="query").inc()
         lexical = self._lexical_query(query_text, filters=filters, limit=limit)
@@ -124,7 +127,11 @@ class FileCorpusService:
         """Return chunks ranked by cosine similarity against *query_embedding*.
 
         Only chunks that have a non-empty ``summary_embedding`` field are
-        considered.  Chunks without embeddings are skipped silently.
+        considered.  Chunks without embeddings are skipped silently.  An empty
+        or all-zero query vector gives every considered chunk a score of
+        ``0.0``.  This semantic-only API does not perform lexical search or
+        catch similarity errors; callers that need lexical fallback should use
+        :meth:`query`.
         """
         results: list[tuple[float, dict[str, Any]]] = []
         for chunk in self._chunks.values():

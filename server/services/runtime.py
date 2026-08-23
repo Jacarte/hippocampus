@@ -175,15 +175,19 @@ def initialize_memory(app: FastAPI, config: dict[str, Any] | None = None) -> Any
     """Build a mem0 instance and install it as the application's runtime state.
 
     A non-empty explicit *config* takes precedence; ``None`` or an empty dict
-    reloads configuration from the environment.  The function updates only
-    ``app.state.memory`` and ``app.state.memory_config``.  File-corpus query
-    state is independent and is neither replaced nor mutated.
+    reloads configuration from the environment.  The function replaces
+    ``app.state.memory`` and ``app.state.memory_config`` only after memory
+    construction succeeds, so a failure leaves any existing runtime state
+    unchanged.  File-corpus query state is independent and is neither replaced
+    nor mutated.
 
     Returns:
         The initialized memory instance stored on the application.
 
     Raises:
         RuntimeError: If configuration validation or memory construction fails.
+        ValueError: If an environment-backed numeric setting is invalid.
+        AttributeError: If the application has no ``memory_factory`` state.
     """
     resolved_config = config or get_config_from_env()
     memory_instance = build_memory_instance(resolved_config, app.state.memory_factory)

@@ -48,7 +48,7 @@ def _populate_file_corpus(app: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 2. Query over a populated corpus returns required provenance fields
+# 1. Query over a populated corpus returns required provenance fields
 # ---------------------------------------------------------------------------
 
 def test_query_over_prepopulated_corpus_returns_code_and_markdown_hits(
@@ -87,7 +87,7 @@ def test_query_over_prepopulated_corpus_returns_code_and_markdown_hits(
 
 
 # ---------------------------------------------------------------------------
-# 3. Degraded query: file corpus raises → returns memory hits + degraded flag
+# 2. Degraded query: file corpus raises → returns memory hits + degraded flag
 # ---------------------------------------------------------------------------
 
 def test_degraded_query_file_corpus_raises_returns_memory_hits_and_degraded_flag(
@@ -108,7 +108,6 @@ def test_degraded_query_file_corpus_raises_returns_memory_hits_and_degraded_flag
             chunk_memory_enabled: bool = False,
             query_embedding: list[float] | None = None,
         ) -> list[dict[str, Any]]:
-            """Simulate an unavailable file corpus for degradation coverage."""
             raise RuntimeError("corpus unavailable")
 
     class StubRetrieval:
@@ -147,7 +146,7 @@ def test_degraded_query_file_corpus_raises_returns_memory_hits_and_degraded_flag
 
 
 # ---------------------------------------------------------------------------
-# 4. Capabilities endpoint returns both memory_store and file_corpus sections
+# 3. Capabilities endpoint returns both memory_store and file_corpus sections
 # ---------------------------------------------------------------------------
 
 def test_capabilities_endpoint_returns_both_sections(monkeypatch: MonkeyPatch) -> None:
