@@ -1,9 +1,9 @@
-"""Real installed-SDK compatibility smoke tests for ``mem0ai==2.0.0``.
+"""Real installed-SDK compatibility smoke tests for ``mem0ai==2.0.7``.
 
 This test file provides two kinds of coverage:
 
 1. **SDK surface smoke coverage** (Section A — always runs, requires no live
-   backend).  Verifies that the installed ``mem0ai==2.0.0`` package exposes
+   backend).  Verifies that the installed ``mem0ai==2.0.7`` package exposes
    every import, classmethod, and ``MemoryConfig`` field the server depends
    on.  These tests pass or fail entirely on the SDK's installed shape — no
    network, no PostgreSQL, no API credentials needed.
@@ -50,10 +50,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def test_sdk_import_and_version() -> None:
-    """The installed ``mem0`` package must be ``2.0.0``."""
+    """The installed ``mem0`` package must be ``2.0.7``."""
     import mem0
 
-    assert mem0.__version__ == "2.0.0"
+    assert mem0.__version__ == "2.0.7"
 
 
 def test_sdk_public_exports() -> None:
@@ -116,12 +116,12 @@ def test_sdk_memory_config_model_fields() -> None:
             f"available fields: {set(fields)}"
         )
 
-    # ``visit_db_path`` is intentionally NOT a ``MemoryConfig`` field in 2.0.0.
+    # ``visit_db_path`` is intentionally NOT a ``MemoryConfig`` field in 2.0.7.
     # The server passes it through the config dict anyway, which Pydantic v2
     # silently tolerates via its extra-field behaviour.  The test documents
     # this as a known non-field so we don't accidentally rely on it.
     assert "visit_db_path" not in fields, (
-        "MemoryConfig.visit_db_path is NOT a field in mem0 2.0.0; "
+        "MemoryConfig.visit_db_path is NOT a field in mem0 2.0.7; "
         "the server passes it through the config dict via Pydantic v2 "
         "extra-field tolerance"
     )
@@ -168,7 +168,7 @@ def test_sdk_memory_config_accepts_server_config_dict() -> None:
 
     assert mc.version == "v1.1"
     assert mc.vector_store.provider == "pgvector"
-    # ``vector_store.config`` is a Pydantic ``PGVectorConfig`` in 2.0.0,
+    # ``vector_store.config`` is a Pydantic ``PGVectorConfig`` in 2.0.7,
     # not a bare dict — access fields via attribute, not subscript.
     pg_config = mc.vector_store.config
     assert pg_config.host == "localhost"
@@ -182,9 +182,9 @@ def test_sdk_memory_config_accepts_server_config_dict() -> None:
 
 
 def test_sdk_pgvector_config_fields() -> None:
-    """The pgvector config block must include the 2.0.0-required new fields.
+    """The pgvector config block must include the fields required by 2.0.7.
 
-    mem0 2.0.0's ``PGVector.__init__`` requires three new positional
+    mem0 2.0.7's ``PGVector.__init__`` requires three positional
     parameters that have no defaults: ``embedding_model_dims``,
     ``diskann``, and ``hnsw``.  The server adds these in
     ``runtime.get_config_from_env()``.  This test proves the
@@ -240,32 +240,32 @@ def test_sdk_query_api_endpoint_signature() -> None:
     facade that delegates to ``QueryService``.
 
     This test verifies that the SDK's ``search`` method — which backs the
-    server's ``/search`` — uses the verified 2.0.0 keyword shape.
+    server's ``/search`` — uses the verified 2.0.7 keyword shape.
     """
     import inspect
     from mem0 import Memory
 
     search_sig = inspect.signature(Memory.search)
     params = list(search_sig.parameters.keys())
-    # mem0 2.0.0: search(self, query, *, top_k=20, filters=None, threshold=0.1, rerank=False)
+    # mem0 2.0.7: search(self, query, *, top_k=20, filters=None, threshold=0.1, rerank=False)
     assert "top_k" in search_sig.parameters, (
-        f"Memory.search must accept top_k in 2.0.0; signature params: {params}"
+        f"Memory.search must accept top_k in 2.0.7; signature params: {params}"
     )
     top_k_default = search_sig.parameters["top_k"].default
     assert top_k_default == 20, (
-        f"Memory.search top_k default must be 20 in 2.0.0, got {top_k_default}"
+        f"Memory.search top_k default must be 20 in 2.0.7, got {top_k_default}"
     )
 
     get_all_sig = inspect.signature(Memory.get_all)
     get_all_params = list(get_all_sig.parameters.keys())
     assert "filters" in get_all_sig.parameters, (
-        f"Memory.get_all must accept filters in 2.0.0; signature params: {get_all_params}"
+        f"Memory.get_all must accept filters in 2.0.7; signature params: {get_all_params}"
     )
 
 
 def test_sdk_memory_from_config_accepts_dict() -> None:
     """``Memory.from_config`` signature must accept a single ``config_dict``
-    positional argument (the already-verified 2.0.0 surface).
+    positional argument (the already-verified 2.0.7 surface).
 
     NOTE: This test does NOT call ``Memory.from_config()`` because that
     requires live backend connections (vector store, LLM, embedder) that
@@ -412,7 +412,7 @@ class TestEndToEndPersistenceProbe:
             f"{create_resp.text}"
         )
         created = create_resp.json()
-        # mem0 2.0.0 ``add()`` returns ``{"results": [{"id": "...", ...}]}``.
+        # mem0 2.0.7 ``add()`` returns ``{"results": [{"id": "...", ...}]}``.
         # The server's ``MemoryService.add()`` forwards this shape through.
         assert "results" in created, (
             f"Create response missing 'results' key: {created}"

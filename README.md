@@ -201,9 +201,9 @@ All tests use `fastapi.testclient.TestClient` with fake memory implementations â
 
 ### Canonical mem0ai version
 
-`mem0ai==2.0.0` is the compatibility baseline. Keep it pinned unless a dedicated compatibility task changes it. If the pin changes, update `server/requirements.txt`, run the smoke paths and `pytest tests/ -v`, then update this README.
+`mem0ai==2.0.7` is the compatibility baseline. Keep it pinned unless a dedicated compatibility task changes it. If the pin changes, update `server/requirements.txt`, run the smoke paths and `pytest tests/ -v`, then update this README.
 
-mem0 2.0.0 introduced breaking changes to the `PGVector` constructor (new required positional parameters `embedding_model_dims`, `diskann`, `hnsw`) and to `get_all`/`search` (entity IDs must now be passed inside a `filters` dict rather than as top-level kwargs). The server's `runtime.py`, `retrieval_service.py`, and `admin_service.py` already handle these adaptations.
+The mem0 2.0 series introduced breaking changes to the `PGVector` constructor (new required positional parameters `embedding_model_dims`, `diskann`, `hnsw`) and to `get_all`/`search` (entity IDs must now be passed inside a `filters` dict rather than as top-level kwargs). The server's `runtime.py`, `retrieval_service.py`, and `admin_service.py` handle these adaptations for the pinned 2.0.7 release.
 
 ### What `/search` does today
 
