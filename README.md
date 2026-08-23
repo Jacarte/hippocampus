@@ -1,6 +1,6 @@
 > The cli will be deprecated, even before using it, since there are other better approaches
 
-# mem0server
+# Hippocampus
 
 This repository contains two applications:
 
@@ -12,7 +12,7 @@ The accepted local default server URL is `http://localhost:8000`. The OpenCode m
 ## Repository Structure
 
 ```
-mem0server/
+hippocampus/
 ├── server/                  # Python FastAPI server
 │   ├── server.py            # App entry point — wires FastAPI routes
 │   ├── api_models.py        # Pydantic request/response models
@@ -34,7 +34,7 @@ mem0server/
 
 ```bash
 git clone <repository-url>
-cd mem0server
+cd hippocampus
 cp .env.example .env
 # Edit .env: set OPENAI_API_KEY and any overrides you need
 ./start.sh
@@ -70,6 +70,7 @@ Public HTTP endpoints:
 ```
 GET  /              → redirect to /docs
 GET  /health
+GET  /metrics
 POST /configure
 POST /memories
 GET  /memories
@@ -81,16 +82,27 @@ DELETE /memories
 POST /search
 POST /retrieve
 POST /reset
+POST /query
+GET  /query/capabilities
+POST /index/sync
+GET  /index/jobs
+GET  /index/jobs/{job_id}
+POST /index/watch/start
+POST /index/watch/stop
+GET  /index/status
+POST /index/reset
 ```
 
 Additive admin endpoints (v1 — internal CMS):
 
 ```
 GET    /admin/health
+GET    /admin/scopes
 GET    /admin/memories?scope=<user|agent|run>&scope_id=<id>&page=<n>&page_size=<n>&query=<optional>
 POST   /admin/memories
 GET    /admin/memories/{memory_id}
 PUT    /admin/memories/{memory_id}
+DELETE /admin/memories/empty
 DELETE /admin/memories/{memory_id}
 POST   /admin/memories/{memory_id}/copy
 POST   /admin/memories/{memory_id}/visits
@@ -99,7 +111,8 @@ GET    /admin/index/overview
 
 ### Configuration
 
-Configuration is driven by environment variables. Accepted defaults:
+Configuration is driven by environment variables. When the Python server runs
+directly, it uses these runtime fallbacks for unset variables:
 
 ```bash
 MEM0_HOST=0.0.0.0
@@ -124,15 +137,19 @@ MEM0_PGVECTOR_HNSW=false
 
 MEM0_LLM_PROVIDER=openai
 MEM0_LLM_MODEL=gpt-5
-MEM0_LLM_TEMPERATURE=0.7
-
 MEM0_EMBEDDER_PROVIDER=openai
-MEM0_EMBEDDER_MODEL=text-embedding-3-small
 ```
 
-OpenAI-backed configurations require `OPENAI_API_KEY`.
+`MEM0_LLM_TEMPERATURE` and `MEM0_EMBEDDER_MODEL` have no Python runtime
+fallback. OpenAI-backed configurations require `OPENAI_API_KEY`.
 
-`MEM0_WORKERS=1` is the safe local/dev default.
+Docker Compose loads values from `.env` and passes them into the container,
+overriding the Python runtime fallbacks. It also supplies its own fallback or
+fixed values, including four workers, a `litellm` LLM, and an `ollama`
+embedder when the corresponding `.env` values are absent. The values in
+`.env.example` are starter examples rather than runtime defaults; inspect that
+file before copying it to `.env`. For direct local execution,
+`MEM0_WORKERS=1` is the Python runtime fallback.
 
 ### Admin CMS contract (v1)
 
@@ -174,7 +191,7 @@ The admin CMS is an internal operator tool. The following features are not imple
 ### Running locally (without Docker)
 
 ```bash
-cd mem0server
+cd hippocampus
 python -m venv mem && source mem/bin/activate
 pip install -r server/requirements.txt
 
@@ -314,7 +331,7 @@ Fields: `query` (required), `corpora` (`"memory_store"` | `"file_corpus"` | `"al
 #### `mgrep_sync`
 
 ```json
-{ "root": "/Users/javcab/mem0server" }
+{ "root": "/path/to/hippocampus" }
 ```
 
 The root path must be accessible to the server process, including from inside its container when applicable. This operation queues a server-side sync; poll the returned job through the indexing jobs API to observe completion or errors.
