@@ -5,7 +5,7 @@ internal attributes (currently ``memory_instance.llm`` and
 ``memory_instance.embedding_model``).  All other service-layer code MUST
 route through the helpers in this module so that:
 
-* The 2.0.0 access path is declared in one location and can be changed
+* The 2.0.7 access path is declared in one location and can be changed
   in one location if a future mem0 release renames / restructures these
   attributes.
 * ``server/services/query_service.py`` uses the embedding helper instead of
@@ -32,11 +32,11 @@ from typing import Any
 _LLM_ATTR: str = "llm"
 _EMBEDDING_ATTR: str = "embedding_model"
 
-# The 2.0.0 LLM client exposes a ``generate_response(messages=...)`` method.
+# The 2.0.7 LLM client exposes a ``generate_response(messages=...)`` method.
 # We keep the surface narrow: only the kwargs the server actually uses.
 _LLM_METHOD: str = "generate_response"
 
-# The 2.0.0 embedder exposes an ``.embed(text, memory_action=...)`` method.
+# The 2.0.7 embedder exposes an ``.embed(text, memory_action=...)`` method.
 # The helper defaults ``memory_action`` to ``"add"`` for compatibility with
 # mem0's write-oriented call shape.  Query retrieval explicitly passes
 # ``None``, causing the helper to omit that keyword argument.
@@ -68,11 +68,11 @@ def _resolve_attr(memory_instance: Any, attr_name: str, *, kind: str) -> Any:
         value = getattr(memory_instance, attr_name)
     except AttributeError as exc:
         raise AttributeError(
-            f"mem0_compat: memory_instance has no {kind!r} attribute {attr_name!r}; this server requires mem0 2.0.0 which exposes it on the Memory instance. ({exc})"
+            f"mem0_compat: memory_instance has no {kind!r} attribute {attr_name!r}; this server requires mem0 2.0.7 which exposes it on the Memory instance. ({exc})"
         ) from exc
     if value is None:
         raise AttributeError(
-            f"mem0_compat: memory_instance.{attr_name} resolved to None; expected a configured mem0 2.0.0 {kind}."
+            f"mem0_compat: memory_instance.{attr_name} resolved to None; expected a configured mem0 2.0.7 {kind}."
         )
     return value
 
@@ -99,7 +99,7 @@ def _resolve_method(obj: Any, method_name: str, *, owner: str) -> Any:
         method = getattr(obj, method_name)
     except AttributeError as exc:
         raise AttributeError(
-            f"mem0_compat: mem0 2.0.0 {owner} is expected to expose {method_name!r}; got {type(obj).__name__!r} which does not. ({exc})"
+            f"mem0_compat: mem0 2.0.7 {owner} is expected to expose {method_name!r}; got {type(obj).__name__!r} which does not. ({exc})"
         ) from exc
     if not callable(method):
         raise AttributeError(
@@ -111,13 +111,13 @@ def _resolve_method(obj: Any, method_name: str, *, owner: str) -> Any:
 def generate_response(memory_instance: Any, *, messages: list[dict[str, Any]]) -> str:
     """Generate an LLM chat-completion response through a mem0 Memory instance.
 
-    Encapsulates the verified mem0 2.0.0 access path
+    Encapsulates the verified mem0 2.0.7 access path
     ``memory_instance.llm.generate_response(messages=...)``.  Callers use this
     helper rather than reaching into ``memory_instance.llm`` directly.
 
     Args:
         memory_instance: A mem0 ``Memory`` instance that exposes ``.llm``
-            (the verified 2.0.0 access path).
+            (the verified 2.0.7 access path).
         messages: Chat-completion messages in the standard
             ``[{"role": ..., "content": ...}, ...]`` shape.  Forwarded
             verbatim as the ``messages`` kwarg to the LLM.
@@ -146,18 +146,18 @@ def embed(
 ) -> Any:
     """Embed a single text string through a mem0 Memory instance.
 
-    Encapsulates the verified mem0 2.0.0 access path
+    Encapsulates the verified mem0 2.0.7 access path
     ``memory_instance.embedding_model.embed(text, memory_action=...)``.
     Used by :mod:`server.services.query_service` for query-time embeddings,
-    with ``memory_action=None`` because the mem0 2.0.0 one-shot query path
+    with ``memory_action=None`` because the mem0 2.0.7 one-shot query path
     does not require a memory action.
 
     Args:
         memory_instance: A mem0 ``Memory`` instance that exposes
-            ``.embedding_model`` (the verified 2.0.0 access path).
+            ``.embedding_model`` (the verified 2.0.7 access path).
         text: The text to embed.
         memory_action: Optional memory-action label forwarded to the
-            embedder.  The verified mem0 2.0.0 call shape accepts
+            embedder.  The verified mem0 2.0.7 call shape accepts
             ``memory_action="add"``; the query path can pass
             ``memory_action=None`` to skip the kwarg entirely.  When
             ``None`` the kwarg is omitted from the call so the embedder

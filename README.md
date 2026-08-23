@@ -262,13 +262,13 @@ curl http://localhost:8000/health
 
 `FileCorpusService` stores prepared file chunks for `/query`. The `USE_CHUNK_MEMORY` server environment variable enables summary-embedding retrieval for chunks that have summary embeddings; lexical file-corpus retrieval remains available when the option is disabled, an embedding is unavailable, or summary retrieval fails. Truthy values are `1`, `true`, and `yes`.
 
-### Native command-line client removal
+### Supported client interfaces
 
 Hippocampus does not distribute a native command-line client or a drop-in command-line replacement. Use the REST API directly, or configure the existing OpenCode plugin integration described below; neither integration is a native Hippocampus CLI.
 
 ### OpenCode integration
 
-The existing OpenCode memory plugin is `~/.config/opencode/plugins/mem0-functional.ts`. Configure its backend with `MEM0_SERVER_URL`; the plugin defaults to `http://localhost:8000`. This plugin integration is separate from the removed native command-line client.
+The existing OpenCode memory plugin is `~/.config/opencode/plugins/mem0-functional.ts`. Configure its backend with `MEM0_SERVER_URL`; the plugin defaults to `http://localhost:8000`.
 
 ---
 
