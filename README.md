@@ -1,5 +1,3 @@
-> The cli will be deprecated, even before using it, since there are other better approaches
-
 # Hippocampus
 
 This repository contains two applications:
@@ -218,25 +216,28 @@ mem0 2.0.0 introduced breaking changes to the `PGVector` constructor (new requir
 
 ### What `/search` does today
 
-`POST /search` delegates to `MemoryService.search(...)` → `RetrievalService.search(...)` → semantic search through `memory_instance.search(...)`. Results are annotated with `_retrieval.stage: semantic`.
+`POST /search` provides semantic memory search. It delegates to `MemoryService.search(...)` → `RetrievalService.search(...)` → `memory_instance.search(...)`, and annotates the returned results with `_retrieval.stage: semantic`. The service also performs lexical processing for diagnostics, but it does not fuse lexical candidates into the returned result set.
 
 ### What `/retrieve` does today
 
-`POST /retrieve` is the backend-owned hybrid retrieval endpoint:
+`POST /retrieve` provides the backend's hybrid ranked result contract. It:
 
-- lexical recall: memory-store-only, scans `memory_instance.get_all(...)`
-- semantic recall: `memory_instance.search(...)`
-- in-process candidate fusion + simple deterministic reranking
-- response includes `backend_capabilities`, `degraded`, and `trace.request_id`
+- gathers lexical candidates by scanning `memory_instance.get_all(...)`
+- gathers semantic candidates through `memory_instance.search(...)`
+- fuses candidates and reranks them only when both candidate stages succeed
+- reports stage support and failures through `backend_capabilities`, `degraded`, and `degradation_reasons`
 
-Degradation behavior:
-- semantic failure → lexical-only with `semantic=false`
-- lexical failure → semantic-only with `lexical=false`
-- rerank failure → pre-rerank fused results with `rerank=false`
+If the semantic or lexical stage fails, the endpoint falls back to results from the available stage. If reranking fails after both candidate stages succeed, it returns the fused candidates without reranking. The capability and degradation metadata describes what happened for that request; it does not guarantee stage availability or ranking quality.
 
 ### Identifier requirements
 
 `POST /memories`, `GET /memories`, and `DELETE /memories` require at least one of `user_id`, `agent_id`, or `run_id`. Missing identifiers return `400`.
+
+The retrieval routes have separate payload contracts:
+
+- `POST /search` requires `query`.
+- `POST /retrieve` requires `query` and `scopes`, where `scopes` is a non-empty list of strings. It also accepts an optional `limit` from 1 through 50.
+- Both routes accept optional `user_id`, `agent_id`, `run_id`, and `filters` fields.
 
 ### Minimal examples
 
@@ -245,12 +246,23 @@ Degradation behavior:
 curl -X POST http://localhost:8000/memories \
   -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"remember this"}],"user_id":"user-1","metadata":{"source":"chat"}}'
+```
 
+```bash
 # Search memories
 curl -X POST http://localhost:8000/search \
   -H "Content-Type: application/json" \
   -d '{"query":"stored","user_id":"user-1","filters":{"source":"chat"}}'
+```
 
+```bash
+# Retrieve hybrid-ranked memories
+curl -X POST http://localhost:8000/retrieve \
+  -H "Content-Type: application/json" \
+  -d '{"query":"stored","scopes":["project"],"user_id":"user-1","limit":10,"filters":{"source":"chat"}}'
+```
+
+```bash
 # Health check
 curl http://localhost:8000/health
 ```
@@ -263,13 +275,11 @@ curl http://localhost:8000/health
 
 ### Native command-line client removal
 
-The former native command-line client is intentionally no longer distributed. No drop-in command-line replacement exists. The REST API and MCP integration remain supported under their own contracts; neither is a command-line-compatible replacement.
+Hippocampus does not distribute a native command-line client or a drop-in command-line replacement. Use the REST API directly, or configure the existing OpenCode plugin integration described below; neither integration is a native Hippocampus CLI.
 
 ### OpenCode integration
 
-- Plugin: `~/.config/opencode/plugins/mem0-functional.ts`
-- Backend env var: `MEM0_SERVER_URL`
-- Canonical default: `http://localhost:8000`
+The existing OpenCode memory plugin is `~/.config/opencode/plugins/mem0-functional.ts`. Configure its backend with `MEM0_SERVER_URL`; the plugin defaults to `http://localhost:8000`. This plugin integration is separate from the removed native command-line client.
 
 ---
 
