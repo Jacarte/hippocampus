@@ -93,7 +93,9 @@ def handle_request(req: dict[str, Any]) -> dict[str, Any] | None:
 
     Backend HTTP failures expose only their status, while transport and internal
     failures use fixed messages; bounded details are retained in server logs.
-    Notifications and unknown notification methods remain response-free.
+    Requests whose method is ``initialized`` and unknown methods without an
+    ``id`` remain response-free; other idless calls follow their method-specific
+    path.
     """
     method: str = req.get("method", "")
     req_id = req.get("id")

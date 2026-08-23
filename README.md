@@ -228,7 +228,7 @@ If the semantic or lexical stage fails, the endpoint falls back to results from 
 
 ### MCP query interface
 
-The MCP bridge exposes `mgrep_query` for memory-store queries. Its inputs are `query`, optional `limit`, and optional `corpora`; as with `POST /query`, `all` is a compatibility alias for `memory_store`. The advertised selector values are `memory_store` and `all`; a raw bridge call that supplies `file_corpus` fails when the backend rejects it with HTTP `422`. The bridge does not expose memory creation or lifecycle controls.
+The MCP bridge exposes `mgrep_query` for memory-store queries. Its inputs are `query`, optional `limit`, and optional `corpora`; as with `POST /query`, `all` is a compatibility alias for `memory_store`. The advertised selector values are `memory_store` and `all`. If a raw bridge call supplies the unsupported `file_corpus` value, the backend rejects it with HTTP `422`, and the bridge returns JSON-RPC error code `-32000` with the exact message `Backend error 422`. Transport failures use the fixed message `Backend request failed`, and unexpected internal failures use `Bridge error`. These public errors do not reflect backend response bodies, submitted inputs, transport details, or internal exception details. The bridge does not expose memory creation or lifecycle controls.
 
 ### Identifier requirements
 
