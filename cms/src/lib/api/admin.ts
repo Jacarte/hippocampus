@@ -1,7 +1,6 @@
 import { apiClient } from './client.ts'
 import type {
   AdminHealthResponse,
-  AdminIndexOverviewResponse,
   AdminMemoryDetail,
   AdminMemoryFilters,
   AdminMemoryListResponse,
@@ -68,8 +67,5 @@ export const adminApi = {
   },
   deleteEmptyMemories(): Promise<{ deleted_count: number; message: string }> {
     return apiClient.delete('/admin/memories/empty')
-  },
-  getIndexOverview(): Promise<AdminIndexOverviewResponse> {
-    return apiClient.get('/admin/index/overview')
   },
 }

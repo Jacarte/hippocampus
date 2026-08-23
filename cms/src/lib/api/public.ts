@@ -38,9 +38,6 @@ export const readOnlyApi = {
   query(payload: ReadOnlyQueryRequest): Promise<unknown> {
     return apiClient.post('/query', payload)
   },
-  getIndexStatus(): Promise<unknown> {
-    return apiClient.get('/index/status')
-  },
   getQueryCapabilities(): Promise<unknown> {
     return apiClient.get('/query/capabilities')
   },

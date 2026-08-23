@@ -8,7 +8,6 @@ type BackendState = 'loading' | 'ready' | 'offline'
 const navigation = [
   { to: '/', label: 'Overview' },
   { to: '/memories', label: 'Memories' },
-  { to: '/index', label: 'Index' },
 ]
 
 export function AppShell() {

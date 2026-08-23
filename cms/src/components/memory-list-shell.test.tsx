@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom'
 // imported here directly.
 import '@testing-library/jest-dom/vitest'
 
+import { AppShell } from './app-shell.tsx'
 import { MemoryListShell } from './memory-list-shell.tsx'
 import type { AdminMemoryListResponse, AdminMemorySummary } from '../lib/api/types.ts'
 
@@ -24,13 +25,37 @@ vi.mock('../lib/api/admin.ts', () => ({
     recordVisit: vi.fn(),
     deleteMemory: vi.fn(),
     deleteEmptyMemories: vi.fn(),
-    getIndexOverview: vi.fn(),
   },
 }))
 
 import { adminApi } from '../lib/api/admin.ts'
 
 const listMemoriesMock = vi.mocked(adminApi.listMemories)
+const getHealthMock = vi.mocked(adminApi.getHealth)
+
+describe('AppShell navigation', () => {
+  beforeEach(() => {
+    getHealthMock.mockReset()
+    getHealthMock.mockReturnValue(new Promise(() => {}))
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('keeps the overview and memories links without exposing index navigation', () => {
+    render(
+      <MemoryRouter>
+        <AppShell />
+      </MemoryRouter>,
+    )
+
+    const navigation = screen.getByRole('navigation', { name: 'Primary navigation' })
+    expect(navigation).toHaveTextContent('Overview')
+    expect(navigation).toHaveTextContent('Memories')
+    expect(navigation).not.toHaveTextContent('Index')
+  })
+})
 
 /**
  * Render `MemoryListShell` inside a `MemoryRouter`.

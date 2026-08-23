@@ -11,7 +11,6 @@ export default defineConfig({
     proxy: {
       '/admin': backendTarget,
       '/health': backendTarget,
-      '/index': backendTarget,
       '/memories': backendTarget,
       '/query': backendTarget,
       '/retrieve': backendTarget,
@@ -19,4 +18,3 @@ export default defineConfig({
     },
   },
 })
-

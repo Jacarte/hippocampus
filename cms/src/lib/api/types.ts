@@ -122,42 +122,6 @@ export type AdminScopesResponse = {
 
 export type AdminHealthResponse = Record<string, unknown>
 
-export type AdminIndexOverviewResponse = {
-  roots: Array<{
-    root: string
-    total_files: number
-    total_chunks: number
-    watcher_active: boolean
-    last_job_id: string | null
-  }>
-  jobs: Array<{
-    job_id: string
-    status: string
-    queued_at: string | null
-    started_at: string | null
-    completed_at: string | null
-    result: unknown
-    errors: unknown[]
-  }>
-  files: Array<{
-    root: string
-    file_path: string
-    chunk_count: number
-    language: string | null
-    last_indexed_at: string | null
-    has_summary_embedding: boolean
-  }>
-  limits: {
-    current_process_state_only: boolean
-  }
-  visibility_inputs: {
-    generated_at: string
-    root_count: number
-    file_count: number
-    chunk_count: number
-  }
-}
-
 export type ReadOnlyQueryRequest = {
   query: string
   corpora?: string[]
