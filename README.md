@@ -2,8 +2,8 @@
 
 This repository contains two applications:
 
-- **`server/`** — A FastAPI REST backend over [`mem0ai`](https://github.com/mem0ai/mem0) that exposes memory CRUD, semantic search, hybrid retrieval, file-corpus indexing, and MCP bridge endpoints.
-- **`cms/`** — A Bun + React + Vite admin UI for operating the server's memory and indexing endpoints.
+- **`server/`** — A FastAPI REST backend over [`mem0ai`](https://github.com/mem0ai/mem0) that exposes memory CRUD, semantic search, hybrid retrieval, file-corpus retrieval, and MCP bridge endpoints.
+- **`cms/`** — A Bun + React + Vite admin UI for operating the server's memory endpoints.
 
 The accepted local default server URL is `http://localhost:8000`. The OpenCode memory plugin connects to this address by default.
 
@@ -14,7 +14,7 @@ hippocampus/
 ├── server/                  # Python FastAPI server
 │   ├── server.py            # App entry point — wires FastAPI routes
 │   ├── api_models.py        # Pydantic request/response models
-│   ├── services/            # Service layer (memory, retrieval, indexing, MCP bridge, …)
+│   ├── services/            # Service layer (memory, retrieval, file corpus, MCP bridge, …)
 │   ├── tests/               # pytest suite
 │   └── requirements.txt     # Python dependencies
 ├── cms/                     # Bun + React + Vite admin UI
@@ -82,13 +82,6 @@ POST /retrieve
 POST /reset
 POST /query
 GET  /query/capabilities
-POST /index/sync
-GET  /index/jobs
-GET  /index/jobs/{job_id}
-POST /index/watch/start
-POST /index/watch/stop
-GET  /index/status
-POST /index/reset
 ```
 
 Additive admin endpoints (v1 — internal CMS):
@@ -104,7 +97,6 @@ DELETE /admin/memories/empty
 DELETE /admin/memories/{memory_id}
 POST   /admin/memories/{memory_id}/copy
 POST   /admin/memories/{memory_id}/visits
-GET    /admin/index/overview
 ```
 
 ### Configuration
@@ -173,7 +165,7 @@ cd cms && bun run build && bun run preview
 # → http://localhost:4173
 ```
 
-The dev server proxies `/admin`, `/health`, `/memories`, `/search`, `/retrieve`, `/query`, and `/index` to `http://localhost:8000` by default. Set `VITE_BACKEND_PROXY_TARGET` to change the backend origin at dev time, or `VITE_API_BASE_URL` to override the runtime API origin in a production build.
+The dev server proxies `/admin`, `/health`, `/memories`, `/search`, `/retrieve`, and `/query` to `http://localhost:8000` by default. Set `VITE_BACKEND_PROXY_TARGET` to change the backend origin at dev time, or `VITE_API_BASE_URL` to override the runtime API origin in a production build.
 
 The backend must be running before the CMS can load data.
 
@@ -182,8 +174,7 @@ The backend must be running before the CMS can load data.
 The admin CMS is an internal operator tool. The following features are not implemented in v1:
 
 - **No authentication or authorization.** Any network client that can reach the admin endpoints can read and write memories. Run the CMS and server on a trusted network only.
-- **No dashboards or analytics views.** The CMS shows raw memory data and index state. There are no charts, graphs, or trend views.
-- **No persistent index history.** The index overview (`GET /admin/index/overview`) reflects the current process state only. Restarting the server clears all index data. The response always sets `limits.current_process_state_only = true`.
+- **No dashboards or analytics views.** The CMS shows raw memory data. There are no charts, graphs, or trend views.
 - **No memory exports.** There is no bulk export, download, or backup facility in the CMS or the admin API.
 
 ### Running locally (without Docker)
@@ -267,11 +258,9 @@ curl -X POST http://localhost:8000/retrieve \
 curl http://localhost:8000/health
 ```
 
-### File indexing options
+### File-corpus retrieval
 
-**`generate_summaries`** — When `true` in a `POST /index/sync` or `POST /index/watch/start` body, the indexing pipeline generates natural-language summaries per chunk. Disabled by default.
-
-**`USE_CHUNK_MEMORY`** (server env var) — Gates chunk-level memory features. Truthy values: `1`, `true`, `yes`.
+`FileCorpusService` stores prepared file chunks for `/query`. The `USE_CHUNK_MEMORY` server environment variable enables summary-embedding retrieval for chunks that have summary embeddings; lexical file-corpus retrieval remains available when the option is disabled, an embedding is unavailable, or summary retrieval fails. Truthy values are `1`, `true`, and `yes`.
 
 ### Native command-line client removal
 

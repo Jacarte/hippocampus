@@ -16,10 +16,9 @@ cd cms && bun install && bun run dev
 
 The Vite dev server starts at `http://localhost:5173` and proxies these paths to the backend:
 
-- `/admin` — admin memory CRUD, visits, index overview
+- `/admin` — admin memory CRUD and visits
 - `/health` — server health check
 - `/memories`, `/search`, `/retrieve`, `/query` — read-only memory and retrieval endpoints
-- `/index` — indexing status
 
 Set `VITE_BACKEND_PROXY_TARGET` to point the proxy at a different backend origin. For example, to reproduce a bug against the remote backend while keeping the CMS on localhost:
 
@@ -51,7 +50,6 @@ The CMS consumes these server endpoints:
 | DELETE | `/admin/memories/{id}` | Delete a memory |
 | POST | `/admin/memories/{id}/copy` | Copy a memory with provenance tracking |
 | POST | `/admin/memories/{id}/visits` | Record a visit event (explicit, not implicit) |
-| GET | `/admin/index/overview` | Current-process index state and file manifest |
 
 ## How visits work
 
@@ -67,10 +65,6 @@ The backend persists `total_visits`, `last_visited_at`, and related aggregates. 
 
 The backend does not compute decay scores. It exposes raw fields: `created_at`, `decay_half_life_days`, `total_visits`, `last_visited_at`, and related TTL metadata. The CMS applies the plugin-authority decay formulas to produce the display values shown in the UI. Popularity (visit counts) and freshness (time-based decay) are separate signals. A memory that has never been visited stays cold regardless of how recently it was created.
 
-## Index overview
-
-`GET /admin/index/overview` returns the current in-process state of the file-corpus indexer: roots, files, chunks, active watchers, and recent jobs. This data lives in memory and is lost when the server process restarts. The response always sets `limits.current_process_state_only = true` to signal this limitation.
-
 ## Environment variables
 
 The CMS itself reads no server-side environment variables. The backend variables that affect CMS behavior:
@@ -85,7 +79,6 @@ The CMS itself reads no server-side environment variables. The backend variables
 
 - **No authentication.** Any client that reaches the admin endpoints can read and write memories.
 - **No dashboards or analytics.** The CMS shows raw data, not charts or trends.
-- **No persistent index history.** Index state is in-memory and resets on server restart.
 - **No bulk exports.** There is no download or backup facility.
 
 ## Commands reference
