@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -45,7 +44,7 @@ class RetrieveRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Unified query & index lifecycle models
+# Unified query models
 # ---------------------------------------------------------------------------
 
 CorpusType = Literal["memory_store", "file_corpus", "all"]
@@ -118,25 +117,6 @@ class UnifiedQueryResponse(BaseModel):
     available_hits_by_corpus: dict[str, int] = Field(default_factory=dict)
     degraded: bool = False
     degradation_reasons: list[str] = []
-
-
-class IndexSyncResponse(BaseModel):
-    root: str
-    files_indexed: int
-    chunks_indexed: int
-    synced_at: datetime
-
-
-class IndexStatusResponse(BaseModel):
-    roots: list[dict[str, Any]]
-    total_files: int
-    total_chunks: int
-
-
-class IndexResetResponse(BaseModel):
-    files_cleared: int
-    chunks_cleared: int
-    reset_at: datetime
 
 
 class CapabilitiesResponse(BaseModel):

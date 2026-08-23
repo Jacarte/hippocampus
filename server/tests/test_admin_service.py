@@ -11,9 +11,8 @@ These tests prove two things the Task 2 plan requires:
   ``copied_from={ source_memory_id, source_scope, source_scope_id }``
   provenance object to admin-initiated writes.
 
-The service methods that Task 5/6/9 will fully implement (list/detail/create/
-update/copy/visit/index) are verified only as *thin placeholders*: they must
-exist with the right signatures and not silently swallow validation errors.
+The retained list/detail/create/update/copy/visit methods are verified through
+their service behavior and validation contracts below.
 """
 from __future__ import annotations
 

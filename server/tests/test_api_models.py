@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -27,13 +26,27 @@ from api_models import (
     CopiedFromInfo,
     CapabilitiesResponse,
     FileHit,
-    IndexResetResponse,
-    IndexStatusResponse,
-    IndexSyncResponse,
     MemoryHit,
     UnifiedQueryRequest,
     UnifiedQueryResponse,
 )
+
+
+REMOVED_INDEX_MODELS = {
+    "IndexSyncRequest",
+    "IndexSyncResponse",
+    "WatchStartRequest",
+    "WatchStopRequest",
+    "IndexStatusResponse",
+    "IndexResetRequest",
+    "IndexResetResponse",
+    "AdminIndexRootInfo",
+    "AdminIndexJobInfo",
+    "AdminIndexFileInfo",
+    "AdminIndexLimits",
+    "AdminIndexVisibilityInputs",
+    "AdminIndexOverviewResponse",
+}
 
 
 def test_file_hit_valid():
@@ -92,35 +105,18 @@ def test_unified_query_response_valid():
     assert resp.degradation_reasons == []
 
 
-def test_index_sync_response_valid():
-    now = datetime.now(timezone.utc)
-    resp = IndexSyncResponse(
-        root="/workspace", files_indexed=3, chunks_indexed=12, synced_at=now
-    )
-    assert resp.files_indexed == 3
-
-
-def test_index_status_response_valid():
-    resp = IndexStatusResponse(roots=[{"path": "/x"}], total_files=1, total_chunks=5)
-    assert resp.total_chunks == 5
-
-
-def test_index_reset_response_valid():
-    now = datetime.now(timezone.utc)
-    resp = IndexResetResponse(files_cleared=2, chunks_cleared=8, reset_at=now)
-    assert resp.files_cleared == 2
-
-
-def test_removed_index_request_models_are_not_exported():
+def test_removed_index_models_are_absent_from_source_exports_and_openapi():
     import api_models
+    from server import create_app
 
-    removed_models = {
-        "IndexSyncRequest",
-        "WatchStartRequest",
-        "WatchStopRequest",
-        "IndexResetRequest",
-    }
-    assert all(not hasattr(api_models, name) for name in removed_models)
+    source = Path(api_models.__file__).read_text()
+    schemas = create_app(startup_enabled=False).openapi()["components"]["schemas"]
+
+    assert all(
+        f"class {name}(" not in source for name in REMOVED_INDEX_MODELS
+    )
+    assert all(not hasattr(api_models, name) for name in REMOVED_INDEX_MODELS)
+    assert REMOVED_INDEX_MODELS.isdisjoint(schemas)
 
 
 def test_capabilities_response_valid():
@@ -409,16 +405,3 @@ def test_admin_memory_visit_response_valid():
     assert resp.total_visits == 5
     assert resp.reason == "detail_open"
 
-
-def test_removed_admin_index_models_are_not_exported():
-    import api_models
-
-    removed_models = {
-        "AdminIndexRootInfo",
-        "AdminIndexJobInfo",
-        "AdminIndexFileInfo",
-        "AdminIndexLimits",
-        "AdminIndexVisibilityInputs",
-        "AdminIndexOverviewResponse",
-    }
-    assert all(not hasattr(api_models, name) for name in removed_models)
