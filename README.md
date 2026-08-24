@@ -130,8 +130,14 @@ MEM0_LLM_MODEL=gpt-5
 MEM0_EMBEDDER_PROVIDER=openai
 ```
 
+Hippocampus supports two LLM setups: direct OpenAI and a LiteLLM
+Proxy/Gateway, which exposes an OpenAI-compatible API. For direct OpenAI, set
+`MEM0_LLM_PROVIDER=openai` and `OPENAI_API_KEY`, configure the model with
+`MEM0_LLM_MODEL` and related model settings, and optionally set
+`OPENAI_BASE_URL` to override the API base URL.
+
 `MEM0_LLM_TEMPERATURE` and `MEM0_EMBEDDER_MODEL` have no Python runtime
-fallback. OpenAI-backed configurations require `OPENAI_API_KEY`.
+fallback.
 
 Docker Compose loads values from `.env` and passes them into the container,
 overriding the Python runtime fallbacks. It also supplies its own fallback or
@@ -140,6 +146,11 @@ embedder when the corresponding `.env` values are absent. The values in
 `.env.example` are starter examples rather than runtime defaults; inspect that
 file before copying it to `.env`. For direct local execution,
 `MEM0_WORKERS=1` is the Python runtime fallback.
+
+For the LiteLLM setup, Docker Compose passes `LITELLM_API_BASE`; point it at
+the configured proxy. If that proxy requires authentication, the supplied
+`OPENAI_API_KEY` must be a key accepted by the proxy. LiteLLM deployments do
+not share a universal key requirement or endpoint.
 
 ### Admin CMS contract (v1)
 
