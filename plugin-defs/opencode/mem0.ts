@@ -2211,6 +2211,11 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 			});
 		},
 
+		/**
+		 * Retrieves project memories through the configured backend mode before
+		 * appending context or replacing the compaction prompt. Retrieval failures
+		 * preserve append output and use the existing fallback for replace mode.
+		 */
 		"experimental.session.compacting": async (_input, output) => {
 			if (!MEM0_SERVER_URL) return;
 
@@ -2221,13 +2226,14 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 			}
 
 			try {
-				const projectMemories = await searchScope(
-					"recent decisions fixes constraints procedures",
-					"project",
-					activeDirectory,
-					undefined,
-					8,
-				);
+				const projectMemories = (
+					await mem0BackendClient.search({
+						query: "recent decisions fixes constraints procedures",
+						scope: "project",
+						identifiers: scopeIdentifiers("project", activeDirectory),
+						limit: 8,
+					})
+				).results;
 
 				if (MEM0_COMPACTION_MODE === "replace") {
 					// WHY: Some teams want deterministic compaction output and prefer
