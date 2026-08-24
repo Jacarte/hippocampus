@@ -7,11 +7,11 @@ OpenCode plugin template. See the [README](./README.md) for copy installation.
 
 The plugin injects a bounded set of durable memories only when a turn is likely
 to benefit from them. It also exposes `mem0` modes for `add`, `search`, `list`,
-`forget`, and `help`, and can add project memory to session compaction. Legacy
-mode queries `POST /search`; backend mode uses `POST /retrieve` for chat,
-explicit search, and compaction. Requests are retried and guarded by a circuit
-breaker, while retrieval failures leave chat available and may reuse the last
-good chat context.
+`forget`, and `help`, and can add project memory to session compaction.
+Automatic recall, explicit search, and compaction call `POST /retrieve`.
+Supersession detection during `add` alone calls `POST /search`. Requests are
+retried and guarded by a circuit breaker, while retrieval failures leave chat
+available and may reuse the last good chat context.
 
 ## OpenCode integration surfaces
 
@@ -39,10 +39,13 @@ durable context available across long sessions without injecting raw history.
 
 ## Server contract
 
-The plugin uses `POST /memories`, `POST /search` or `POST /retrieve`,
-`GET /memories`, and `DELETE /memories/{memory_id}`. The Hippocampus server also
-offers get-by-ID, update, history, delete-all, reset, query, and configure
-operations, but this plugin does not expose or call those extra operations.
+The plugin uses `POST /memories`, `POST /retrieve`, `GET /memories`, and
+`DELETE /memories/{memory_id}` for its main memory operations. Automatic recall,
+explicit search, and compaction use `POST /retrieve`. During `add`, supersession
+detection uses `POST /search` to find similar older memories; this is the only
+plugin flow that calls `/search`. The Hippocampus server also offers get-by-ID,
+update, history, delete-all, reset, query, and configure operations, but this
+plugin does not expose or call those extra operations.
 
 ## Why this plugin exists
 
@@ -177,33 +180,29 @@ Why:
 
 This plugin is almost entirely tuned through environment variables. The list below reflects what the code actually reads today.
 
-### Backend connection and retrieval mode
+### Server connection and retrieval
 
 - `MEM0_SERVER_URL`
   - Source fallback: `http://100.75.83.103:18000`
   - What it does: points the plugin at the mem0-compatible backend and strips any trailing `/` characters.
   - Important: the fallback is an environment-specific address, not a portable localhost default. Set this variable explicitly to the running server's base URL.
 
-- `MEM0_BACKEND_MODE`
-  - Default: `legacy`
-  - Accepted values: `backend` enables the newer `/retrieve` path; anything else falls back to `legacy` mode and uses `/search`.
-  - What it does: switches chat retrieval, explicit `search`, and compaction retrieval behavior and response expectations.
-  - Change this when: your server supports backend-native retrieval and ranking.
+Automatic recall sends one `POST /retrieve` request with the user, project,
+agent, and environment scopes, the derived identifiers, `limit: 10`, and
+`filters.include_cold_context: false`. Explicit `search` calls the same endpoint
+for its selected scope. Retrieve responses preserve normalized
+`backend_capabilities`, `degraded`, `degradation_reasons`, and `request_id`
+diagnostics when the server supplies them.
 
-Legacy chat retrieval sends four `POST /search` requests, one each for the
-user, project, agent, and environment scopes. Each body contains the query,
-derived `user_id` and `agent_id`, and `filters.scope`. Backend chat retrieval
-sends one `POST /retrieve` request with all four scopes, the derived
-identifiers, `limit: 10`, and `filters.include_cold_context: false`.
-
-Explicit `search` follows the same mode distinction for its selected scope.
-Backend responses preserve normalized `backend_capabilities`, `degraded`,
-`degradation_reasons`, and `request_id` diagnostics when the server supplies
-them.
+Supersession detection is deliberately different. When `add` checks for
+similar older memories, `detectSupersedes` uses the server's scope-specific
+`POST /search` API. The current server API and plugin implementation require
+that exception; no recall, explicit-search, or compaction flow uses `/search`.
 
 - `MEM0_READ_TIMEOUT_MS`
   - Default: `8000`
-  - What it does: timeout for `POST /search` and all `GET` requests.
+  - What it does: timeout for the supersession-detection `POST /search` request
+    and all `GET` requests.
   - Tradeoff: lower values fail faster; higher values tolerate slower backends.
 
 - `MEM0_WRITE_TIMEOUT_MS`
@@ -275,11 +274,9 @@ them.
   - Use `replace` when: you want deterministic compaction output that always includes the Mem0 memory section.
 
 Compaction uses identifiers derived from the active session directory and
-requests at most eight results. In backend mode it sends one `POST /retrieve`
-body with `scopes: ["project"]`, `limit: 8`, and
-`filters.include_cold_context: false`. In legacy mode it sends `POST /search`
-with `filters.scope: "project"`; the client applies the limit after normalizing
-the response.
+sends one `POST /retrieve` request for at most eight results. The request body
+uses `scopes: ["project"]`, `limit: 8`, and
+`filters.include_cold_context: false`.
 
 On success, append mode adds a memory block only when normalized memories exist
 and otherwise changes nothing. Replace mode always sets the Mem0-aware prompt,

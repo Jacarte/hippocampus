@@ -21,8 +21,10 @@ Use the URL for your deployment. Although the source currently has a fallback
 URL (`http://100.75.83.103:18000`), that address is environment-specific and is
 not a portable local default. Configure `MEM0_SERVER_URL` explicitly.
 
-Set `MEM0_BACKEND_MODE=backend` when the server supports `POST /retrieve`.
-Otherwise, omit it or set it to `legacy` to use `POST /search`.
+The server must support `POST /retrieve` for automatic recall, explicit
+`search`, and compaction. It must also support `POST /search` for the check that
+runs when `add` may supersede an older memory. Supersession detection is the
+only plugin flow that calls `/search`.
 
 ## Project installation
 
@@ -68,8 +70,13 @@ Add the same pinned dependencies to
 
 OpenCode runs `bun install` at startup to install local-plugin dependencies
 from the matching configuration directory. The `package.json` and `bun.lock`
-beside this README are only the repository's Bun test harness. Do not copy that
-lockfile into an OpenCode configuration directory as the installation lock.
+beside this README support repository dependency and type checks. Do not copy
+that lockfile into an OpenCode configuration directory as the installation
+lock.
+
+The repository no longer includes the local plugin hook matrix, so that matrix
+is not an acceptance mechanism. Server route tests do not replace plugin
+coverage for request selection, retries, or compaction append/replace fallback.
 
 You must **restart the OpenCode process/session after copying or changing the
 plugin or its target-directory dependencies**. A running session keeps the
@@ -85,12 +92,11 @@ The plugin exposes one `mem0` tool with five modes:
 
 - `add`: stores high-signal content after privacy, quality, metadata, and
   optional anchor processing.
-- `search`: queries one memory scope through `/search` in legacy mode or
-  `/retrieve` in backend mode.
+- `search`: queries one memory scope through `/retrieve`.
 - `list`: lists memories for the selected identity scope.
 - `forget`: deletes one memory by ID.
-- `help`: reports the available modes, scopes, backend mode, and search
-  endpoint without changing memory.
+- `help`: reports the available modes, scopes, and high-signal storage guidance
+  without changing memory.
 
 The plugin also retrieves memory automatically for selected chat turns and
 during session compaction. It supports only the operations above; other server
