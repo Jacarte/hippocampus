@@ -1,41 +1,48 @@
-# mem0-functional Plugin Architecture (Why-First)
+# mem0-functional plugin architecture
 
-This document explains why the plugin is designed the way it is, not just what each function does.
+This document explains the behavior and design of the maintained `mem0.ts`
+OpenCode plugin template. See the [README](./README.md) for copy installation.
 
-File: `~/.config/opencode/plugins/mem0-functional.ts`
+## TL;DR
 
-## Reference backend implementation
+The plugin injects a bounded set of durable memories only when a turn is likely
+to benefit from them. It also exposes `mem0` modes for `add`, `search`, `list`,
+`forget`, and `help`, and can add project memory to session compaction. Legacy
+mode queries `POST /search`; backend mode uses `POST /retrieve` for chat,
+explicit search, and compaction. Requests are retried and guarded by a circuit
+breaker, while retrieval failures leave chat available and may reuse the last
+good chat context.
 
-This plugin is wired to a local reference server implementation at:
+## OpenCode integration surfaces
 
-- `~/.config/opencode/plugins/mem0server/`
-- Server docs [here](https://github.com/Jacarte/smallmem0server/blob/main/README.md)
+The plugin returns seven OpenCode surfaces:
 
-Runtime endpoint contract expected by this plugin:
+- `chat.message` detects remember/recall signals, first-turn and periodic
+  refreshes, and topic shifts. It ranks and deduplicates results before adding
+  a bounded synthetic `[MEM0 CONTEXT]` part.
+- `tool.mem0` exposes the five explicit modes. `add` may include `anchor` or
+  `anchorContext`, and safe Git context may be inferred when available.
+- `chat.params` records provider parameter diagnostics only when prompt debug
+  logging is enabled; it does not change the parameters.
+- `experimental.chat.messages.transform` records summarized message diagnostics
+  when prompt debug logging is enabled; it does not transform the messages.
+- `experimental.chat.system.transform` records system-prompt diagnostics when
+  prompt debug logging is enabled; it does not transform the system prompt.
+- `experimental.session.compacting` retrieves up to eight project memories and
+  either appends a context block or replaces the compaction prompt.
+- `event` archives a completed compaction summary as cold memory when enabled
+  and removes session-local state after `session.deleted`.
 
-- `POST /memories`
-- `POST /search`
-- `GET /memories`
-- `DELETE /memories/{memory_id}`
+In practice, `chat.message` decides when automatic retrieval is worthwhile,
+and `tool.mem0` handles explicit operations. Compaction and event handling keep
+durable context available across long sessions without injecting raw history.
 
-By default, the plugin resolves `MEM0_SERVER_URL` to `http://192.168.0.160:18000`.
+## Server contract
 
-## Hook integration summary
-
-The plugin integrates with OpenCode through four hooks that map to different phases of a session:
-
-- `chat.message`: runs on each user message. It detects recall intent or topic shift, retrieves ranked memories from mem0, and injects a bounded `[MEM0 CONTEXT]` block into the prompt parts.
-- `tool` (custom tool `mem0`): provides explicit memory operations (`add`, `search`, `list`, `forget`, `help`) so the assistant can persist and query high-signal memories on demand.
-- `tool` `add` mode can optionally pass backend-owned anchoring data via `anchor` or `anchorContext`, which the mem0 server validates or derives into canonical anchor metadata.
-- `experimental.session.compacting`: runs during session compaction and appends high-signal project memory (or replaces compaction prompt when configured) so durable context survives long sessions.
-- `event`: listens to runtime events such as `message.updated` (to archive finished compaction summaries as cold memory) and `session.deleted` (to clean per-session in-memory state).
-
-Operational flow in practice:
-
-1. User sends a message -> `chat.message` decides whether retrieval is worth it.
-2. If retrieval is triggered, mem0 search results are ranked, deduped, and injected under strict budget limits.
-3. If the model decides to store/retrieve explicitly, it calls the `mem0` tool through the plugin's custom tool hook.
-4. On compaction, `experimental.session.compacting` and `event` cooperate to preserve long-term continuity while keeping active context lean.
+The plugin uses `POST /memories`, `POST /search` or `POST /retrieve`,
+`GET /memories`, and `DELETE /memories/{memory_id}`. The Hippocampus server also
+offers get-by-ID, update, history, delete-all, reset, query, and configure
+operations, but this plugin does not expose or call those extra operations.
 
 ## Why this plugin exists
 
@@ -173,30 +180,41 @@ This plugin is almost entirely tuned through environment variables. The list bel
 ### Backend connection and retrieval mode
 
 - `MEM0_SERVER_URL`
-  - Default: `http://192.168.0.160:18000`
+  - Source fallback: `http://100.75.83.103:18000`
   - What it does: points the plugin at the mem0-compatible backend and strips any trailing `/` characters.
-  - Change this when: the backend runs on a different host, port, or base URL.
+  - Important: the fallback is an environment-specific address, not a portable localhost default. Set this variable explicitly to the running server's base URL.
 
 - `MEM0_BACKEND_MODE`
   - Default: `legacy`
   - Accepted values: `backend` enables the newer `/retrieve` path; anything else falls back to `legacy` mode and uses `/search`.
-  - What it does: switches retrieval behavior and response expectations.
+  - What it does: switches chat retrieval, explicit `search`, and compaction retrieval behavior and response expectations.
   - Change this when: your server supports backend-native retrieval and ranking.
+
+Legacy chat retrieval sends four `POST /search` requests, one each for the
+user, project, agent, and environment scopes. Each body contains the query,
+derived `user_id` and `agent_id`, and `filters.scope`. Backend chat retrieval
+sends one `POST /retrieve` request with all four scopes, the derived
+identifiers, `limit: 10`, and `filters.include_cold_context: false`.
+
+Explicit `search` follows the same mode distinction for its selected scope.
+Backend responses preserve normalized `backend_capabilities`, `degraded`,
+`degradation_reasons`, and `request_id` diagnostics when the server supplies
+them.
 
 - `MEM0_READ_TIMEOUT_MS`
   - Default: `8000`
-  - What it does: timeout for read-like operations such as `/search`, `/retrieve`, and `GET` requests.
+  - What it does: timeout for `POST /search` and all `GET` requests.
   - Tradeoff: lower values fail faster; higher values tolerate slower backends.
 
 - `MEM0_WRITE_TIMEOUT_MS`
   - Default: `45000`
-  - What it does: timeout for write-like operations such as `POST /memories`.
+  - What it does: timeout for all other requests, including `POST /memories`, `POST /retrieve`, and deletes. Despite being a retrieval endpoint, `/retrieve` currently uses this timeout.
   - Tradeoff: higher values are safer for slow persistence paths, but failures take longer to surface.
 
 ### Retrieval cadence and prompt-budget controls
 
 - `MEM0_REFRESH_EVERY_TURNS`
-  - Default: `6`
+  - Default: `10`
   - What it does: if memory was previously injected, forces a periodic refresh after this many turns.
   - Tradeoff: lower means fresher context but more retrieval overhead.
 
@@ -253,8 +271,21 @@ This plugin is almost entirely tuned through environment variables. The list bel
 - `MEM0_COMPACTION_MODE`
   - Default: `append`
   - Accepted values: `replace` or anything else, which behaves as `append`
-  - What it does: controls whether Mem0 project memory is appended to the compaction prompt or replaces it with a stricter Mem0-aware compaction prompt.
+  - What it does: retrieves project memory with the fixed query `recent decisions fixes constraints procedures` and controls whether that memory is appended to context or placed in a replacement prompt.
   - Use `replace` when: you want deterministic compaction output that always includes the Mem0 memory section.
+
+Compaction uses identifiers derived from the active session directory and
+requests at most eight results. In backend mode it sends one `POST /retrieve`
+body with `scopes: ["project"]`, `limit: 8`, and
+`filters.include_cold_context: false`. In legacy mode it sends `POST /search`
+with `filters.scope: "project"`; the client applies the limit after normalizing
+the response.
+
+On success, append mode adds a memory block only when normalized memories exist
+and otherwise changes nothing. Replace mode always sets the Mem0-aware prompt,
+including a no-verified-memory statement when the result is empty. After an
+exhausted retrieval failure, append mode preserves both existing context and
+prompt; replace mode sets the same no-verified-memory fallback prompt.
 
 - `MEM0_SAVE_COLD_COMPACTION`
   - Default: disabled
@@ -325,10 +356,12 @@ This plugin is almost entirely tuned through environment variables. The list bel
 
 When mem0 is unavailable:
 
-1. retries are attempted
-2. breaker may open temporarily
-3. chat keeps running without hard failure
-4. fallback snippet may be injected if available
+1. the plugin attempts each request up to three times
+2. the circuit breaker may open temporarily after failed request cycles
+3. chat continues without a memory-backend exception
+4. automatic chat retrieval may inject the session's last good context snippet
+5. explicit tool modes return a structured failure instead of throwing to chat
+6. compaction follows the append/replace failure behavior described above
 
 Why:
 
@@ -341,7 +374,7 @@ Near-term improvements should prioritize:
 1. better confidence-based retrieval gating
 2. stronger supersession semantics (active/inactive memory views)
 3. periodic lifecycle maintenance (demotion/expiry)
-4. evaluation harness for memory precision/recall quality
+4. evaluation of memory precision and recall quality
 
 Why:
 
