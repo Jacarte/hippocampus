@@ -7,20 +7,31 @@ type CompactionMode = "append" | "replace";
 type Outcome = "success" | "failure";
 
 interface RecordedRequest {
+	/** Absolute URL captured by the fixture's fetch replacement. */
 	url: string;
+	/** HTTP method after applying the fixture's GET fallback. */
 	method: string;
+	/** Parsed JSON request body emitted by the compaction hook. */
 	body: Record<string, unknown>;
 }
 
 interface FixtureResult {
+	/** Every request, including retries, in emission order. */
 	requests: RecordedRequest[];
+	/** Compaction outputs after the hook completes. */
 	output: {
+		/** Existing context plus any appended Mem0 block. */
 		context: string[];
+		/** Existing or replacement prompt, depending on compaction mode. */
 		prompt?: string;
 	};
 }
 
-/** Runs one isolated compaction scenario so module-level environment is fresh. */
+/**
+ * Runs one matrix scenario in a subprocess so module-level environment is fresh.
+ * The helper requires a clean exit with no stderr and returns the fixture's parsed
+ * request and output record.
+ */
 function runCompactionScenario(
 	backendMode: BackendMode,
 	compactionMode: CompactionMode,
@@ -42,7 +53,10 @@ function runCompactionScenario(
 	) as FixtureResult;
 }
 
-/** Returns the deterministic project identifiers expected from the fixture directory. */
+/**
+ * Returns the project identifiers that production scope derivation creates for
+ * the fixture directory, rather than identifiers supplied by the test server.
+ */
 function expectedIdentifiers(): { user_id: string; agent_id: string } {
 	const digest = createHash("sha256")
 		.update("/tmp/mem0-compaction-project")

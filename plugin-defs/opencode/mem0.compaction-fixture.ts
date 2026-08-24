@@ -18,13 +18,17 @@ process.env.MEM0_USER_ID = "fixture-user";
 process.env.MEM0_SAVE_COLD_COMPACTION = "0";
 
 interface RecordedRequest {
+	/** Absolute URL received by the fetch replacement. */
 	url: string;
+	/** HTTP method received by the fetch replacement. */
 	method: string;
+	/** Parsed JSON body, or undefined when the request has no body. */
 	body: unknown;
 }
 
 const requests: RecordedRequest[] = [];
 
+/** Records requests and returns deterministic success or retryable-failure responses. */
 globalThis.fetch = Object.assign(
 	async (
 		input: string | URL | Request,
@@ -82,7 +86,12 @@ if (!compact) {
 	throw new Error("Mem0FunctionalPlugin did not register the compaction hook");
 }
 
-const output: { context: string[]; prompt?: string } = {
+const output: {
+	/** Existing context that append mode may extend. */
+	context: string[];
+	/** Existing prompt that replace mode may overwrite. */
+	prompt?: string;
+} = {
 	context: ["existing context"],
 	prompt: "existing prompt",
 };
