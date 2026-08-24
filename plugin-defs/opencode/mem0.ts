@@ -2013,12 +2013,14 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 		},
 
 		/**
-		 * Retrieves up to eight project memories through the backend.
-		 * Unlike chat retrieval, compaction queries only the active directory's project
-		 * scope. Append mode leaves both outputs unchanged when retrieval is empty or
-		 * fails; replace mode always writes either a memory-aware prompt or its existing
-		 * no-memory fallback. When cold compaction storage is enabled, it also marks
-		 * the session for later archival.
+		 * Retrieves at most eight memories for the active directory's project scope via
+		 * `POST /retrieve`. Unlike supersession detection, it never calls `POST /search`;
+		 * unlike chat recall's all-scope request, it requests only the project scope. If
+		 * the server URL is unavailable, the handler is a no-op. After the handler
+		 * proceeds, append mode leaves prompt and context unchanged on empty retrieval or
+		 * error; replace mode always writes either a memory-aware prompt or its existing
+		 * no-memory fallback. With cold storage enabled, the session is marked pending
+		 * before retrieval, so empty or failed retrieval remains eligible for archival.
 		 */
 		"experimental.session.compacting": async (_input, output) => {
 			if (!MEM0_SERVER_URL) return;
