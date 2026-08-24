@@ -2,7 +2,7 @@
 
 This repository contains two applications:
 
-- **`server/`** — A FastAPI REST backend over [`mem0ai`](https://github.com/mem0ai/mem0) that exposes memory CRUD, semantic search, hybrid retrieval, memory-store queries, and an MCP bridge.
+- **`server/`** — A FastAPI REST backend over [`mem0ai`](https://github.com/mem0ai/mem0) for memory CRUD, semantic search, hybrid retrieval, and memory-store queries. The directory also includes a standalone MCP stdio bridge.
 - **`cms/`** — A Bun + React + Vite admin UI for operating the server's memory endpoints.
 
 The accepted local default server URL is `http://localhost:8000`.
@@ -228,7 +228,25 @@ If the semantic or lexical stage fails, the endpoint falls back to results from 
 
 ### MCP query interface
 
-The MCP bridge exposes `mgrep_query` for memory-store queries. Its inputs are `query`, optional `limit`, and optional `corpora`; as with `POST /query`, `all` is a compatibility alias for `memory_store`. The advertised selector values are `memory_store` and `all`. If a raw bridge call supplies the unsupported `file_corpus` value, the backend rejects it with HTTP `422`, and the bridge returns JSON-RPC error code `-32000` with the exact message `Backend error 422`. Transport failures use the fixed message `Backend request failed`, and unexpected internal failures use `Bridge error`. These public errors do not reflect backend response bodies, submitted inputs, transport details, or internal exception details. The bridge does not expose memory creation or lifecycle controls.
+Hippocampus ships a standalone MCP bridge that connects a local MCP client to the REST backend. Make the backend reachable first, then configure the client to launch this command from the repository root:
+
+```bash
+python server/services/mcp_bridge.py
+```
+
+The bridge reads newline-delimited JSON-RPC from stdin and writes responses to stdout, so the client must run it as a local stdio child process. It sends queries to `MEM0_SERVER_URL`, which defaults to `http://localhost:8000`; set that environment variable when the backend uses another URL. The bridge advertises protocol version `2024-11-05`.
+
+`start.sh` and the Docker image start only the REST service; they do not launch the bridge. The REST service exposes neither an `/mcp` nor an `/sse` route.
+
+The bridge exposes one tool, `mgrep_query`, with these inputs:
+
+- `query` (required): the search text.
+- `corpora` (optional, default `["all"]`): a selector list whose advertised values are `memory_store` and `all`. Both values query only the memory store.
+- `limit` (optional, default `10`): the maximum number of results, from 1 through 50.
+
+The MCP schema does not expose the HTTP-only `user_id` or `min_score_memory` inputs. Successful tool content contains the JSON-serialized `/query` response; how that text is rendered depends on the client.
+
+If a raw bridge call supplies the unsupported `file_corpus` value, the backend rejects it with HTTP `422`, and the bridge returns JSON-RPC error code `-32000` with the exact message `Backend error 422`. Transport failures use the fixed message `Backend request failed`, and unexpected internal failures use `Bridge error`. These public errors do not reflect backend response bodies, submitted inputs, transport details, or internal exception details. Unknown tools return JSON-RPC code `-32601`. The bridge does not expose memory creation, indexing, or lifecycle controls.
 
 ### Identifier requirements
 
