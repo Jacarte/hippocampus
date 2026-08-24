@@ -268,13 +268,6 @@ curl -X POST http://localhost:8000/retrieve \
 curl http://localhost:8000/health
 ```
 
-### Supported client interfaces
-
-Hippocampus does not distribute a native command-line client or a drop-in command-line replacement. Use the REST API directly, or configure an external integration according to its documentation.
-
-### OpenCode integration
-
-Hippocampus exposes its REST API at `http://localhost:8000` by default. This repository does not distribute an OpenCode plugin. Configure any external integration according to that integration's documentation.
 
 ---
 
