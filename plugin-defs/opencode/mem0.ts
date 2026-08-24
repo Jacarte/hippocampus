@@ -9,8 +9,6 @@ import { tool, type Plugin } from "@opencode-ai/plugin";
 const MEM0_SERVER_URL = (
 	process.env.MEM0_SERVER_URL || "http://100.75.83.103:18000"
 ).replace(/\/+$/, "");
-// Backend mode: "legacy" (direct) or "backend" (REST API)
-const MEM0_BACKEND_MODE = resolveMem0BackendMode(process.env.MEM0_BACKEND_MODE);
 // Auto-anchor context inference: "off" or "safe"
 const MEM0_AUTO_ANCHOR_CONTEXT = resolveAutoAnchorContextMode(
 	process.env.MEM0_AUTO_ANCHOR_CONTEXT,
@@ -78,7 +76,6 @@ type MemoryType =
 	| "stable-fact"
 	| "procedure"
 	| "noise";
-type Mem0BackendMode = "legacy" | "backend";
 type Mem0AutoAnchorContextMode = "off" | "safe";
 type Mem0AnchorType = "file" | "commit" | "pr" | "issue";
 type Mem0AnchorProvenanceMode = "verified" | "derived";
@@ -150,12 +147,7 @@ interface MemoryCandidate extends MemoryResult {
 	scope: Scope;
 	type: string;
 	fingerprint: string;
-	createdAt?: number;
-	ttlExpiresAt?: number;
-	decayHalfLifeDays?: number;
 	inject: boolean;
-	semantic: number;
-	rankScore: number;
 }
 
 interface SessionState {
@@ -176,7 +168,6 @@ interface PluginMetrics {
 }
 
 interface Mem0BackendClientDependencies {
-	mode: Mem0BackendMode;
 	parseResults: (payload: unknown) => MemoryResult[];
 	request: (path: string, init: RequestInit) => Promise<unknown>;
 }
@@ -186,12 +177,13 @@ interface Mem0ToolSearchParams {
 	limit?: number;
 	query: string;
 	scope: Scope;
+	scopes?: Scope[];
 }
 
 interface Mem0ToolSearchResponse {
-	mode: Mem0BackendMode;
-	endpoint: "/search" | "/retrieve";
+	endpoint: "/retrieve";
 	results: MemoryResult[];
+	payload: unknown;
 	backendCapabilities?: JsonRecord;
 	degraded?: boolean;
 	degradationReasons?: string[];
@@ -284,10 +276,6 @@ function asStringList(value: unknown): string[] | undefined {
 function normalizeLimit(value: number | undefined): number {
 	if (!Number.isFinite(value)) return 10;
 	return Math.max(1, Math.floor(value || 10));
-}
-
-function resolveMem0BackendMode(value: string | undefined): Mem0BackendMode {
-	return value === "backend" ? "backend" : "legacy";
 }
 
 function resolveAutoAnchorContextMode(
@@ -477,58 +465,36 @@ function inferAutomaticAnchorContext(
 
 function createMem0BackendClient(dependencies: Mem0BackendClientDependencies) {
 	return {
-		mode: dependencies.mode,
 		async search(
 			params: Mem0ToolSearchParams,
 		): Promise<Mem0ToolSearchResponse> {
 			const limit = normalizeLimit(params.limit);
-
-			if (dependencies.mode === "backend") {
-				const payload = await dependencies.request("/retrieve", {
-					method: "POST",
-					body: JSON.stringify({
-						query: params.query,
-						scopes: [params.scope],
-						...params.identifiers,
-						limit,
-						filters: {
-							include_cold_context: false,
-						},
-					}),
-				});
-
-				const parsed = asRecord(payload);
-				return {
-					mode: dependencies.mode,
-					endpoint: "/retrieve",
-					results: dependencies.parseResults(payload).slice(0, limit),
-					backendCapabilities:
-						asRecord(parsed?.backend_capabilities) || undefined,
-					degraded: parsed?.degraded === true,
-					degradationReasons: asStringList(parsed?.degradation_reasons),
-					requestId:
-						typeof parsed?.request_id === "string"
-							? parsed.request_id
-							: undefined,
-				};
-			}
-
-			const payload = await dependencies.request("/search", {
+			const payload = await dependencies.request("/retrieve", {
 				method: "POST",
 				body: JSON.stringify({
 					query: params.query,
+					scopes: params.scopes || [params.scope],
 					...params.identifiers,
-					filters: { scope: params.scope },
+					limit,
+					filters: {
+						include_cold_context: false,
+					},
 				}),
 			});
 
 			const parsed = asRecord(payload);
 			return {
-				mode: dependencies.mode,
-				endpoint: "/search",
+				endpoint: "/retrieve",
 				results: dependencies.parseResults(payload).slice(0, limit),
+				payload,
 				backendCapabilities:
 					asRecord(parsed?.backend_capabilities) || undefined,
+				degraded: parsed?.degraded === true,
+				degradationReasons: asStringList(parsed?.degradation_reasons),
+				requestId:
+					typeof parsed?.request_id === "string"
+						? parsed.request_id
+						: undefined,
 			};
 		},
 	};
@@ -606,17 +572,6 @@ function summarizeMessages(
 			parts: message.parts.map(summarizePart),
 		};
 	});
-}
-
-function parseTimestamp(value: unknown): number | undefined {
-	if (typeof value === "number" && Number.isFinite(value)) return value;
-	if (typeof value === "string") {
-		const asNum = Number(value);
-		if (Number.isFinite(asNum)) return asNum;
-		const asDate = Date.parse(value);
-		if (Number.isFinite(asDate)) return asDate;
-	}
-	return undefined;
 }
 
 function hasOwnKey(value: JsonRecord, key: string): boolean {
@@ -810,33 +765,6 @@ function deriveHalfLifeDays(type: string): number {
 	if (type === "procedure") return 7;
 	if (type === "problem-fix") return 4;
 	return 4;
-}
-
-function computeRecencyScore(candidate: MemoryCandidate): number {
-	const createdAt = candidate.createdAt;
-	if (!createdAt) return 0.5;
-	const ageDays = Math.max(0, (Date.now() - createdAt) / 86_400_000);
-	const halfLife =
-		candidate.decayHalfLifeDays || deriveHalfLifeDays(candidate.type);
-	const decay = 0.5 ** (ageDays / halfLife);
-	const ttlExpired =
-		candidate.ttlExpiresAt && Date.now() > candidate.ttlExpiresAt;
-	return ttlExpired ? decay * 0.25 : decay;
-}
-
-function typeWeight(type: string): number {
-	if (type === "decision") return 1;
-	if (type === "stable-fact") return 0.95;
-	if (type === "procedure") return 0.9;
-	if (type === "problem-fix") return 0.8;
-	return 0.6;
-}
-
-function scopeBoost(scope: Scope): number {
-	if (scope === "project") return 1;
-	if (scope === "user") return 0.9;
-	if (scope === "agent") return 0.8;
-	return 0.75;
 }
 
 const RECALL_INTENT_PATTERN =
@@ -1100,7 +1028,6 @@ async function mem0Request(path: string, init: RequestInit): Promise<unknown> {
 }
 
 const mem0BackendClient = createMem0BackendClient({
-	mode: MEM0_BACKEND_MODE,
 	parseResults: normalizeResults,
 	request: mem0Request,
 });
@@ -1152,31 +1079,7 @@ function normalizeBackendRetrieveCandidates(
 				typeof metadata?.fingerprint === "string"
 					? metadata.fingerprint
 					: contentFingerprint(content),
-			createdAt: parseTimestamp(
-				row.created_at ||
-					row.createdAt ||
-					metadata?.created_at ||
-					metadata?.createdAt,
-			),
-			ttlExpiresAt: parseTimestamp(
-				row.ttl_expires_at ||
-					row.ttlExpiresAt ||
-					metadata?.ttl_expires_at ||
-					metadata?.ttlExpiresAt,
-			),
-			decayHalfLifeDays:
-				typeof row.decay_half_life_days === "number"
-					? row.decay_half_life_days
-					: typeof row.decayHalfLifeDays === "number"
-						? row.decayHalfLifeDays
-						: typeof metadata?.decay_half_life_days === "number"
-							? metadata.decay_half_life_days
-							: typeof metadata?.decayHalfLifeDays === "number"
-								? metadata.decayHalfLifeDays
-								: undefined,
 			inject: metadata?.inject !== false,
-			semantic: typeof score === "number" ? score : 0.5,
-			rankScore: typeof score === "number" ? score : 0,
 		};
 
 		if (!candidate.id || !candidate.inject || candidate.type === "noise")
@@ -1216,57 +1119,6 @@ function asScope(value: unknown): Scope | undefined {
 	)
 		return value;
 	return undefined;
-}
-
-function toCandidate(scope: Scope, row: MemoryResult): MemoryCandidate {
-	const metadata = row.metadata || {};
-	const metadataScope = asScope(metadata.scope);
-	const createdAt = parseTimestamp(metadata.created_at || metadata.createdAt);
-	const ttlExpiresAt = parseTimestamp(
-		metadata.ttl_expires_at || metadata.ttlExpiresAt,
-	);
-	const decayHalfLifeDays =
-		typeof metadata.decay_half_life_days === "number"
-			? metadata.decay_half_life_days
-			: typeof metadata.decayHalfLifeDays === "number"
-				? metadata.decayHalfLifeDays
-				: undefined;
-	const type = typeof metadata.type === "string" ? metadata.type : "unknown";
-	const inject = metadata.inject !== false;
-	const semantic = typeof row.score === "number" ? row.score : 0.5;
-
-	return {
-		...row,
-		scope: metadataScope || scope,
-		type,
-		fingerprint:
-			typeof metadata.fingerprint === "string"
-				? metadata.fingerprint
-				: contentFingerprint(row.content),
-		createdAt,
-		ttlExpiresAt,
-		decayHalfLifeDays,
-		inject,
-		semantic,
-		rankScore: 0,
-	};
-}
-
-function rankCandidates(candidates: MemoryCandidate[]): MemoryCandidate[] {
-	return candidates
-		.map((candidate) => {
-			const recency = computeRecencyScore(candidate);
-			const weighted =
-				0.6 * candidate.semantic +
-				0.2 * recency +
-				0.15 * typeWeight(candidate.type) +
-				0.05 * scopeBoost(candidate.scope);
-			return {
-				...candidate,
-				rankScore: weighted,
-			};
-		})
-		.sort((left, right) => right.rankScore - left.rankScore);
 }
 
 function updateLRU(list: string[], id: string): string[] {
@@ -1474,39 +1326,6 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 		return supersedes;
 	}
 
-	async function retrieveRankedCandidates(
-		query: string,
-		directory: string,
-		agent?: string,
-	): Promise<MemoryCandidate[]> {
-		metrics.retrievalAttempts += 1;
-		const [userMemories, projectMemories, agentMemories, environmentMemories] =
-			await Promise.all([
-				searchScope(query, "user", directory, agent, MAX_CONTEXT_ITEMS),
-				searchScope(query, "project", directory, agent, MAX_CONTEXT_ITEMS),
-				searchScope(query, "agent", directory, agent, MAX_CONTEXT_ITEMS),
-				searchScope(query, "environment", directory, agent, MAX_CONTEXT_ITEMS),
-			]);
-
-		const candidates = [
-			...userMemories.map((row) => toCandidate("user", row)),
-			...projectMemories.map((row) => toCandidate("project", row)),
-			...agentMemories.map((row) => toCandidate("agent", row)),
-			...environmentMemories.map((row) => toCandidate("environment", row)),
-		].filter(
-			(candidate) =>
-				candidate.inject &&
-				candidate.type !== "noise" &&
-				candidate.content.length > 0,
-		);
-
-		if (candidates.length > 0) {
-			metrics.retrievalHits += 1;
-		}
-
-		return rankCandidates(candidates);
-	}
-
 	async function retrieveBackendCandidates(
 		query: string,
 		directory: string,
@@ -1514,20 +1333,18 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 	): Promise<MemoryCandidate[]> {
 		metrics.retrievalAttempts += 1;
 		const identifiers = scopeIdentifiers("project", directory, agent);
-		const payload = await mem0Request("/retrieve", {
-			method: "POST",
-			body: JSON.stringify({
-				query,
-				scopes: ["user", "project", "agent", "environment"],
-				...identifiers,
-				limit: MAX_CONTEXT_ITEMS,
-				filters: {
-					include_cold_context: false,
-				},
-			}),
+		const response = await mem0BackendClient.search({
+			query,
+			scope: "project",
+			scopes: ["user", "project", "agent", "environment"],
+			identifiers,
+			limit: MAX_CONTEXT_ITEMS,
 		});
 
-		const candidates = normalizeBackendRetrieveCandidates(payload, "project");
+		const candidates = normalizeBackendRetrieveCandidates(
+			response.payload,
+			"project",
+		);
 		if (candidates.length > 0) {
 			metrics.retrievalHits += 1;
 		}
@@ -1681,7 +1498,6 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 
 	await appendLifecycleDebugEvent("mem0.lifecycle", {
 		stage: "plugin.init",
-		backendMode: MEM0_BACKEND_MODE,
 		serverURL: MEM0_SERVER_URL,
 		autoRetrieveFirstTurn: MEM0_AUTO_RETRIEVE_FIRST_TURN,
 		refreshEveryTurns: MEM0_REFRESH_EVERY_TURNS,
@@ -1757,18 +1573,11 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 			}
 
 			try {
-				const ranked =
-					MEM0_BACKEND_MODE === "backend"
-						? await retrieveBackendCandidates(
-								userMessage,
-								activeDirectory,
-								input.agent,
-							)
-						: await retrieveRankedCandidates(
-								userMessage,
-								activeDirectory,
-								input.agent,
-							);
+				const ranked = await retrieveBackendCandidates(
+					userMessage,
+					activeDirectory,
+					input.agent,
+				);
 				const selected = selectForInjection(ranked, state);
 				if (selected.length === 0) {
 					await appendLifecycleDebugEvent("mem0.lifecycle", {
@@ -1776,7 +1585,6 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 						sessionID: input.sessionID,
 						messageID: output.message.id,
 						turn: state.turn,
-						backendMode: MEM0_BACKEND_MODE,
 						rankedCount: ranked.length,
 						selectedCount: 0,
 						reason: { firstTurn, recallIntent, periodicRefresh, topicShift },
@@ -1825,7 +1633,6 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 					sessionID: input.sessionID,
 					messageID: output.message.id,
 					turn: state.turn,
-					backendMode: MEM0_BACKEND_MODE,
 					fallbackInjected: Boolean(state.lastGoodContextSnippet),
 					reason: { firstTurn, recallIntent, periodicRefresh, topicShift },
 					error: error instanceof Error ? error.message : String(error),
@@ -1923,11 +1730,6 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 								success: true,
 								modes: ["add", "search", "list", "forget", "help"],
 								scopes: ["user", "project", "agent", "environment"],
-								backend_mode: MEM0_BACKEND_MODE,
-								search_endpoint:
-									mem0BackendClient.mode === "backend"
-										? "/retrieve"
-										: "/search",
 								note: "Only high-signal memories should be stored. Optional add-mode anchoring can be passed via anchor or anchorContext; safe git context is auto-enriched when available.",
 							};
 							await appendLifecycleDebugEvent("mem0.tool", {
@@ -2055,7 +1857,6 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 							const toolResponse = {
 								success: true,
 								scope,
-								mode: searchResponse.mode,
 								endpoint: searchResponse.endpoint,
 								backend_capabilities: searchResponse.backendCapabilities,
 								degraded: searchResponse.degraded,
@@ -2212,7 +2013,7 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 		},
 
 		/**
-		 * Retrieves up to eight project memories through the configured backend mode.
+		 * Retrieves up to eight project memories through the backend.
 		 * Unlike chat retrieval, compaction queries only the active directory's project
 		 * scope. Append mode leaves both outputs unchanged when retrieval is empty or
 		 * fails; replace mode always writes either a memory-aware prompt or its existing
