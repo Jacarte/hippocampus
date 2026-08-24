@@ -2216,8 +2216,8 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 		 * Unlike chat retrieval, compaction queries only the active directory's project
 		 * scope. Append mode leaves both outputs unchanged when retrieval is empty or
 		 * fails; replace mode always writes either a memory-aware prompt or its existing
-		 * no-memory fallback. With no server URL, the hook is a no-op. When cold
-		 * compaction storage is enabled, it also marks the session for later archival.
+		 * no-memory fallback. When cold compaction storage is enabled, it also marks
+		 * the session for later archival.
 		 */
 		"experimental.session.compacting": async (_input, output) => {
 			if (!MEM0_SERVER_URL) return;
