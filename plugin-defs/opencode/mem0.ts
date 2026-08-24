@@ -2016,11 +2016,11 @@ export const Mem0FunctionalPlugin: Plugin = async (ctx) => {
 		 * Retrieves at most eight memories for the active directory's project scope via
 		 * `POST /retrieve`. Unlike supersession detection, it never calls `POST /search`;
 		 * unlike chat recall's all-scope request, it requests only the project scope. If
-		 * the server URL is unavailable, the handler is a no-op. After the handler
-		 * proceeds, append mode leaves prompt and context unchanged on empty retrieval or
-		 * error; replace mode always writes either a memory-aware prompt or its existing
-		 * no-memory fallback. With cold storage enabled, the session is marked pending
-		 * before retrieval, so empty or failed retrieval remains eligible for archival.
+		 * the server URL is unavailable, the handler is a no-op. Otherwise, append mode
+		 * leaves prompt and context unchanged on empty results or retrieval failure;
+		 * replace mode writes either a memory-aware prompt or its existing no-memory
+		 * fallback. With cold storage enabled, the session is marked pending before
+		 * retrieval, so empty results and failures remain eligible for archival.
 		 */
 		"experimental.session.compacting": async (_input, output) => {
 			if (!MEM0_SERVER_URL) return;
