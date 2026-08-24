@@ -18,8 +18,8 @@ available and may reuse the last good chat context.
 The plugin returns seven OpenCode surfaces:
 
 - `chat.message` detects remember/recall signals, first-turn and periodic
-  refreshes, and topic shifts. It ranks and deduplicates results before adding
-  a bounded synthetic `[MEM0 CONTEXT]` part.
+  refreshes, and topic shifts. `/retrieve` owns result ranking and order; the
+  plugin filters and deduplicates those results before bounded injection.
 - `tool.mem0` exposes the five explicit modes. `add` may include `anchor` or
   `anchorContext`, and safe Git context may be inferred when available.
 - `chat.params` records provider parameter diagnostics only when prompt debug
@@ -95,22 +95,19 @@ Why:
 - Never refreshing causes stale context in longer sessions.
 - Triggered policy balances relevance and cost.
 
-### 3) Cross-scope ranking + dedupe before injection
+### 3) Server-ranked retrieval + plugin filtering before injection
 
-Candidates from user/project/agent/environment are pooled and ranked, then deduped.
+`POST /retrieve` ranks cross-scope candidates and determines their result order.
+The plugin preserves that order while normalizing and filtering candidates,
+deduplicating them, suppressing memories recently injected into the session,
+and applying injection budgets.
 
 Why:
 
-- Scope-by-scope injection can over-represent one scope and duplicate facts.
-- A unified ranking chooses globally best memories for this turn.
+- Normalization rejects candidates that cannot or should not be injected.
 - Dedupe protects context quality and reduces prompt bloat.
-
-Current weighting intention:
-
-- semantic relevance is primary
-- recency prevents stale dominance
-- type weight favors durable facts/decisions
-- scope boost gives project context mild priority
+- Recent-injection suppression avoids repeating context within a session.
+- Hard item and character budgets keep the final context bounded.
 
 ### 4) Hard injection budget
 
