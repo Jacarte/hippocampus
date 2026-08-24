@@ -5,7 +5,7 @@ This repository contains two applications:
 - **`server/`** — A FastAPI REST backend over [`mem0ai`](https://github.com/mem0ai/mem0) that exposes memory CRUD, semantic search, hybrid retrieval, memory-store queries, and an MCP bridge.
 - **`cms/`** — A Bun + React + Vite admin UI for operating the server's memory endpoints.
 
-The accepted local default server URL is `http://localhost:8000`. The OpenCode memory plugin connects to this address by default.
+The accepted local default server URL is `http://localhost:8000`.
 
 ## Repository Structure
 
@@ -145,7 +145,7 @@ file before copying it to `.env`. For direct local execution,
 
 The admin endpoints define the contract for an internal CMS operator tool. Key design decisions:
 
-- **Decay scores are NOT computed in the backend.** The backend exposes raw fields (`created_at`, `decay_half_life_days`, `total_visits`, `last_visited_at`, etc.) and the CMS computes display values using the plugin-authority formulas from `~/.config/opencode/plugins/mem0-functional.ts` (`deriveHalfLifeDays`, `computeRecencyScore`).
+- **Decay scores are NOT computed in the backend.** The backend exposes raw fields (`created_at`, `decay_half_life_days`, `total_visits`, `last_visited_at`, etc.), and the CMS uses them to compute display values such as decay and recency scores.
 - **Popularity and freshness are separate signals.** Popularity comes from persisted visit telemetry (`total_visits`, `visit_ratio`). Freshness comes from `last_visited_at`, `created_at`, `decay_half_life_days`, and optional TTL fields. Never-visited items remain cold regardless of creation time.
 - **Visit recording is explicit.** Detail views do not implicitly record visits via GET. The CMS must call `POST /admin/memories/{memory_id}/visits` with the appropriate reason (`detail_open`, `edit_save`, `copy_source`).
 - **Audit stamps are applied server-side.** All CMS-initiated writes include `impersonated_by=admin`. Copy operations also include `copied_from` provenance metadata.
@@ -270,11 +270,11 @@ curl http://localhost:8000/health
 
 ### Supported client interfaces
 
-Hippocampus does not distribute a native command-line client or a drop-in command-line replacement. Use the REST API directly, or configure the existing OpenCode plugin integration described below; neither integration is a native Hippocampus CLI.
+Hippocampus does not distribute a native command-line client or a drop-in command-line replacement. Use the REST API directly, or configure an external integration according to its documentation.
 
 ### OpenCode integration
 
-The existing OpenCode memory plugin is `~/.config/opencode/plugins/mem0-functional.ts`. Configure its backend with `MEM0_SERVER_URL`; the plugin defaults to `http://localhost:8000`.
+Hippocampus exposes its REST API at `http://localhost:8000` by default. This repository does not distribute an OpenCode plugin. Configure any external integration according to that integration's documentation.
 
 ---
 
