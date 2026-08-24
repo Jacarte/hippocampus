@@ -97,10 +97,11 @@ Why:
 
 ### 3) Server-ranked retrieval + plugin filtering before injection
 
-`POST /retrieve` ranks cross-scope candidates and determines their result order.
-The plugin preserves that order while normalizing and filtering candidates,
-deduplicating them, suppressing memories recently injected into the session,
-and applying injection budgets.
+`POST /retrieve` ranks and orders the returned cross-scope candidates.
+Normalization, filtering, deduplication, recent-injection suppression, and
+budget selection preserve the candidates' relative order. Final context
+presentation groups selected memories in fixed user, project, agent, and
+environment scope order while preserving server order within each scope.
 
 Why:
 
