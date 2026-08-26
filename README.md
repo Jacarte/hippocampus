@@ -259,6 +259,12 @@ The MCP schema does not expose the HTTP-only `user_id` or `min_score_memory` inp
 
 If a raw bridge call supplies the unsupported `file_corpus` value, the backend rejects it with HTTP `422`, and the bridge returns JSON-RPC error code `-32000` with the exact message `Backend error 422`. Transport failures use the fixed message `Backend request failed`, and unexpected internal failures use `Bridge error`. These public errors do not reflect backend response bodies, submitted inputs, transport details, or internal exception details. Unknown tools return JSON-RPC code `-32601`. The bridge does not expose memory creation, indexing, or lifecycle controls.
 
+### OpenCode memory plugin
+
+The maintained TypeScript OpenCode plugin is separate from the Python stdio MCP bridge above. To install it, copy `plugin-defs/opencode/mem0.ts` to either `.opencode/plugins/` or `~/.config/opencode/plugins/`, add the matching `@opencode-ai/plugin` and `@opencode-ai/sdk` dependencies to that configuration directory, and restart OpenCode. Set `MEM0_SERVER_URL=http://localhost:8000` explicitly for a local server. See the [installation guide](plugin-defs/opencode/README.md) and [functional guide](plugin-defs/opencode/functional.md) for the copy commands, pinned dependency versions, and configuration details.
+
+The plugin provides automatic recall, retrieval diagnostics, and memory context during compaction. Its `mem0` tool supports the `add`, `search`, `list`, `forget`, and `help` modes across the `user`, `project`, `agent`, and `environment` scopes. Automatic recall, explicit retrieval through `search`, and compaction use `POST /retrieve`; only add-time supersession detection uses `POST /search`.
+
 ### Identifier requirements
 
 `POST /memories`, `GET /memories`, and `DELETE /memories` require at least one of `user_id`, `agent_id`, or `run_id`. Missing identifiers return `400`.
