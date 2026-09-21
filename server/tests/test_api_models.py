@@ -26,6 +26,8 @@ from api_models import (
     CopiedFromInfo,
     CapabilitiesResponse,
     MemoryHit,
+    RetrieveRequest,
+    SearchRequest,
     UnifiedQueryRequest,
     UnifiedQueryResponse,
 )
@@ -46,6 +48,59 @@ REMOVED_INDEX_MODELS = {
     "AdminIndexVisibilityInputs",
     "AdminIndexOverviewResponse",
 }
+
+
+def test_search_request_promotes_nested_user_id_from_filters():
+    """Platform-SDK style nested scope must reach the top-level field.
+
+    Regression: the nested id used to be stripped as an unknown metadata key,
+    leaving no identifier and triggering mem0's "filters must contain at least
+    one of: user_id, agent_id, run_id" 400.
+    """
+    req = SearchRequest(query="q", filters={"user_id": "javcab"})
+    assert req.user_id == "javcab"
+    assert req.filters is None
+
+
+def test_search_request_promotes_all_entity_ids_and_keeps_metadata():
+    req = SearchRequest(
+        query="q",
+        filters={
+            "user_id": "u1",
+            "agent_id": "a1",
+            "run_id": "r1",
+            "source": "chat",
+        },
+    )
+    assert (req.user_id, req.agent_id, req.run_id) == ("u1", "a1", "r1")
+    assert req.filters == {"source": "chat"}
+
+
+def test_search_request_explicit_top_level_wins_over_nested():
+    req = SearchRequest(query="q", user_id="explicit", filters={"user_id": "nested"})
+    assert req.user_id == "explicit"
+    assert req.filters is None
+
+
+def test_search_request_leaves_pure_metadata_filters_untouched():
+    req = SearchRequest(query="q", user_id="u1", filters={"source": "chat"})
+    assert req.user_id == "u1"
+    assert req.filters == {"source": "chat"}
+
+
+def test_search_request_ignores_non_string_and_empty_nested_ids():
+    req = SearchRequest(query="q", filters={"user_id": "", "agent_id": 123})
+    assert req.user_id is None
+    assert req.agent_id is None
+    assert req.filters is None
+
+
+def test_retrieve_request_promotes_nested_user_id_from_filters():
+    req = RetrieveRequest(
+        query="q", scopes=["user"], filters={"user_id": "javcab", "source": "chat"}
+    )
+    assert req.user_id == "javcab"
+    assert req.filters == {"source": "chat"}
 
 
 def test_memory_hit_valid():

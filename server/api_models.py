@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Message(BaseModel):
@@ -18,12 +18,49 @@ class MemoryCreate(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+_ENTITY_ID_KEYS: tuple[str, ...] = ("user_id", "agent_id", "run_id")
+
+
+def _promote_nested_entity_ids(model: Any) -> Any:
+    """Lift ``user_id``/``agent_id``/``run_id`` out of ``filters`` to top level.
+
+    Clients modelled on the mem0 platform SDK send the scope nested, e.g.
+    ``{"query": "...", "filters": {"user_id": "u1"}}``, while this server's
+    retrieval layer reads the scope from the top-level fields and treats
+    everything inside ``filters`` as *metadata* filters.  Without this
+    normalization the nested id is stripped as an unknown metadata key, the
+    identifier set ends up empty, and mem0 rejects the call with
+    "filters must contain at least one of: user_id, agent_id, run_id".
+
+    An explicit top-level value always wins; a duplicate nested key is simply
+    dropped.  ``filters`` is reset to ``None`` when nothing but entity ids was
+    supplied, so the response ``params`` echo stays free of an empty dict.
+    """
+    filters = model.filters
+    if not isinstance(filters, dict):
+        return model
+    remaining = dict(filters)
+    for key in _ENTITY_ID_KEYS:
+        if key not in remaining:
+            continue
+        value = remaining.pop(key)
+        if getattr(model, key, None) is None and isinstance(value, str) and value:
+            setattr(model, key, value)
+    if len(remaining) != len(filters):
+        model.filters = remaining or None
+    return model
+
+
 class SearchRequest(BaseModel):
     query: str = Field(..., description="Search query.")
     user_id: str | None = None
     run_id: str | None = None
     agent_id: str | None = None
     filters: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def promote_nested_entity_ids(self) -> "SearchRequest":
+        return _promote_nested_entity_ids(self)
 
 
 class RetrieveRequest(BaseModel):
@@ -41,6 +78,10 @@ class RetrieveRequest(BaseModel):
         description="Maximum number of ranked results to return.",
     )
     filters: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def promote_nested_entity_ids(self) -> "RetrieveRequest":
+        return _promote_nested_entity_ids(self)
 
 
 # ---------------------------------------------------------------------------
