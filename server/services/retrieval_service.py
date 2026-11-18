@@ -21,6 +21,10 @@ from .metrics import (
 
 class RetrievalService:
     _RETRIEVE_CONTROL_FILTER_KEYS: frozenset[str] = frozenset({"include_cold_context"})
+    # Eligibility is enforced locally because older records can lack these
+    # metadata fields. Expand a full backend page when excluded records would
+    # otherwise consume the requested result slots, but keep work bounded.
+    _MAX_ELIGIBILITY_CANDIDATES = 200
 
     # mem0 2.0.0 identifier keys that must live INSIDE the ``filters`` dict —
     # passing them as top-level ``get_all``/``search`` kwargs raises ValueError
@@ -188,6 +192,7 @@ class RetrievalService:
         agent_id: str | None = None,
         filters: dict[str, Any] | None = None,
     ) -> Any:
+        self._include_cold_context(filters)
         params = self._search_params(
             user_id=user_id,
             run_id=run_id,
@@ -317,14 +322,16 @@ class RetrievalService:
         ]
         if not requested_scopes:
             raise ValueError("At least one retrieval scope is required.")
+        self._include_cold_context(filters)
 
         identifier_params = self._identifier_params(
             user_id=user_id,
             run_id=run_id,
             agent_id=agent_id,
         )
-        retrieval_filters = self._strip_retrieve_control_filters(filters)
-        combined_filters = self._combine_filters(retrieval_filters, requested_scopes)
+        # Keep controls until each stage has applied eligibility. The stages
+        # strip them before matching metadata or calling mem0.
+        combined_filters = self._combine_filters(filters, requested_scopes)
 
         with stage_timer() as total_elapsed_ms:
             lexical_results, lexical_latency_ms, lexical_reason = (
@@ -484,18 +491,38 @@ class RetrievalService:
         identifier_params: dict[str, Any],
         filters: dict[str, Any] | None,
     ) -> list[dict[str, Any]]:
-        records = self._coerce_records(
-            memory_instance.get_all(
-                **self.build_mem0_get_all_kwargs(
-                    identifier_params=identifier_params
+        include_cold_context = self._include_cold_context(filters)
+        metadata_filters = self._strip_retrieve_control_filters(filters)
+        candidate_limit = max(20, self._lexical_candidate_limit)
+        max_candidates = max(candidate_limit, self._MAX_ELIGIBILITY_CANDIDATES)
+        while True:
+            records = self._coerce_records(
+                memory_instance.get_all(
+                    **self.build_mem0_get_all_kwargs(
+                        identifier_params=identifier_params,
+                        top_k=candidate_limit,
+                    )
                 )
             )
-        )
-        if filters is not None:
-            records = [
-                record for record in records if self._matches_filters(record, filters)
+            eligible = [
+                record
+                for record in records
+                if self._eligible_for_recall(
+                    record, include_cold_context=include_cold_context
+                )
+                and (
+                    metadata_filters is None
+                    or self._matches_filters(record, metadata_filters)
+                )
             ]
-        return self._lexical_candidates(query=query, records=records)
+            if (
+                len(eligible) >= self._lexical_candidate_limit
+                or len(records) < candidate_limit
+                or len(eligible) == len(records)
+                or candidate_limit >= max_candidates
+            ):
+                return self._lexical_candidates(query=query, records=eligible)
+            candidate_limit = min(candidate_limit * 2, max_candidates)
 
     @staticmethod
     def _search_params(
@@ -609,7 +636,7 @@ class RetrievalService:
         filters: dict[str, Any] | None,
         top_k: int = 20,
     ) -> tuple[Any, float, bool]:
-        """Run a single semantic ``memory_instance.search`` call.
+        """Run semantic search with shared eligibility before result limiting.
 
         Translates the server-side ``identifier_params`` + metadata
         ``filters`` into the explicit mem0 2.0.0 kwargs (see
@@ -636,15 +663,41 @@ class RetrievalService:
             (exceptions are propagated to the caller and recorded via
             :func:`trace_backend_error`).
         """
-        mem0_kwargs = self.build_mem0_search_kwargs(
-            identifier_params=identifier_params,
-            filters=filters,
-            top_k=top_k,
-        )
+        include_cold_context = self._include_cold_context(filters)
+        metadata_filters = self._strip_retrieve_control_filters(filters)
+        candidate_limit = top_k
+        max_candidates = max(top_k, self._MAX_ELIGIBILITY_CANDIDATES)
         with stage_timer() as semantic_elapsed_ms:
             try:
-                response = memory_instance.search(query=query, **mem0_kwargs)
-                return response, semantic_elapsed_ms(), False
+                while True:
+                    mem0_kwargs = self.build_mem0_search_kwargs(
+                        identifier_params=identifier_params,
+                        filters=metadata_filters,
+                        top_k=candidate_limit,
+                    )
+                    response = memory_instance.search(query=query, **mem0_kwargs)
+                    records = self._coerce_records(response)
+                    eligible = [
+                        record
+                        for record in records
+                        if self._eligible_for_recall(
+                            record, include_cold_context=include_cold_context
+                        )
+                    ]
+                    if (
+                        len(eligible) >= top_k
+                        or len(records) < candidate_limit
+                        or len(eligible) == len(records)
+                        or candidate_limit >= max_candidates
+                    ):
+                        if isinstance(response, dict) and isinstance(
+                            response.get("results"), list
+                        ):
+                            response = {**response, "results": eligible[:top_k]}
+                        elif isinstance(response, list):
+                            response = eligible[:top_k]
+                        return response, semantic_elapsed_ms(), False
+                    candidate_limit = min(candidate_limit * 2, max_candidates)
             except Exception as exc:
                 trace_backend_error("retrieval.semantic_stage", exc)
                 raise
@@ -927,23 +980,26 @@ class RetrievalService:
             where ``reason`` is ``None`` on success and
             ``"semantic_unavailable"`` when the underlying search raised.
         """
-        mem0_kwargs = self.build_mem0_search_kwargs(
-            identifier_params=identifier_params,
-            filters=filters,
-        )
         with stage_timer() as semantic_elapsed_ms:
             try:
-                response = memory_instance.search(query=query, **mem0_kwargs)
+                response, _, _ = self._semantic_search(
+                    memory_instance,
+                    query=query,
+                    identifier_params=identifier_params,
+                    filters=filters,
+                    top_k=self._semantic_candidate_limit,
+                )
             except Exception as exc:
                 trace_backend_error("retrieval.semantic_stage", exc)
                 return [], semantic_elapsed_ms(), "semantic_unavailable"
 
             records = self._coerce_records(response)
-            if filters is not None:
+            metadata_filters = self._strip_retrieve_control_filters(filters)
+            if metadata_filters is not None:
                 records = [
                     record
                     for record in records
-                    if self._matches_filters(record, filters)
+                    if self._matches_filters(record, metadata_filters)
                 ]
             semantic_results = [
                 self._annotate_candidate(
@@ -976,6 +1032,39 @@ class RetrievalService:
             if key not in self._RETRIEVE_CONTROL_FILTER_KEYS
         }
         return sanitized_filters or None
+
+    @staticmethod
+    def _include_cold_context(filters: dict[str, Any] | None) -> bool:
+        value = (filters or {}).get("include_cold_context", False)
+        if not isinstance(value, bool):
+            raise ValueError("include_cold_context must be a boolean.")
+        return value
+
+    @staticmethod
+    def _eligible_for_recall(
+        record: dict[str, Any], *, include_cold_context: bool
+    ) -> bool:
+        """Keep legacy memories eligible while respecting explicit exclusions.
+
+        Archive reads are deliberate: ``include_cold_context=true`` admits
+        archive records even when their archive writer set ``inject=false``.
+        It never admits noise or a non-archive memory marked non-injectable.
+        Both flat and nested metadata are checked conservatively so a flat
+        value cannot override an exclusion stored in metadata.
+        """
+        metadata = record.get("metadata")
+        sources = [record, metadata] if isinstance(metadata, dict) else [record]
+        if any(source.get("type") == "noise" for source in sources):
+            return False
+        is_archive = any(
+            source.get("cold_context") is True
+            or source.get("type") == "compaction-archive"
+            or source.get("tier") in ("cold", "archive")
+            for source in sources
+        )
+        if is_archive:
+            return include_cold_context
+        return not any(source.get("inject") is False for source in sources)
 
     def _semantic_score(self, candidate: dict[str, Any]) -> float | None:
         raw_score = candidate.get("score")

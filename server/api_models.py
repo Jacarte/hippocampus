@@ -16,6 +16,17 @@ class MemoryCreate(BaseModel):
     agent_id: str | None = None
     run_id: str | None = None
     metadata: dict[str, Any] | None = None
+    infer: bool = Field(
+        default=True,
+        description="Extract durable knowledge; false stores already selected text directly.",
+    )
+    capture_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        pattern=r"\S",
+        description="Stable, scoped idempotency key for a capture and its retries.",
+    )
 
 
 _ENTITY_ID_KEYS: tuple[str, ...] = ("user_id", "agent_id", "run_id")

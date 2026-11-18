@@ -208,13 +208,113 @@ uvicorn server.server:app --host 0.0.0.0 --port 8000 --workers 1 --app-dir .
 cd server && pytest tests/ -v
 ```
 
-All tests use `fastapi.testclient.TestClient` with fake memory implementations — no live OpenAI calls or network access required.
+The offline suite uses `fastapi.testclient.TestClient`, fake providers, and the
+installed SDK with stubbed storage/LLM clients. The optional persistence probes
+in `test_mem0_compatibility.py` skip when a live backend is unavailable.
 
 ### Canonical mem0ai version
 
 `mem0ai==2.0.7` is the compatibility baseline. Keep it pinned unless a dedicated compatibility task changes it. If the pin changes, update `server/requirements.txt`, run the smoke paths and `pytest tests/ -v`, then update this README.
 
 The mem0 2.0 series introduced breaking changes to the `PGVector` constructor (new required positional parameters `embedding_model_dims`, `diskann`, `hnsw`) and to `get_all`/`search` (entity IDs must now be passed inside a `filters` dict rather than as top-level kwargs). The server's `runtime.py`, `retrieval_service.py`, and `admin_service.py` handle these adaptations for the pinned 2.0.7 release.
+
+### Memory selection and reliable writes
+
+`POST /memories` accepts `infer` (default `true`). With inference enabled, the
+server supplies the versioned policy in `server/services/memory_policy.py` as
+mem0's top-level `custom_instructions`. It asks the extractor to retain accepted
+decisions, confirmed fixes, stable preferences/constraints, and reusable
+procedures while excluding speculation, temporary progress, narration, and
+whole conversation or compaction summaries. These instructions guide an LLM;
+they are not a deterministic classifier or a requirement to save something at
+every turn or session boundary.
+
+Configuration precedence is an explicit `/configure` `custom_instructions`
+value, then `MEM0_CUSTOM_INSTRUCTIONS`, then the checked-in policy. An explicit
+empty string or JSON `null` uses the SDK's native extraction instructions
+without the Hippocampus addition. Environment configuration survives restarts;
+`/configure` updates the current process only. `MEM0_LLM_EXTRA_CONFIG` still
+configures the LLM provider and is not the extraction-policy setting.
+
+Use `infer: false` when a caller has already selected the exact memory text.
+This bypasses extraction; callers remain responsible for selecting appropriate
+content. Metadata such as `source`, `observed_at`, and source identifiers is
+preserved. An observation date in metadata records provenance; it does not
+enable the OSS SDK's unsupported native `timestamp` feature.
+
+Clients that retry captures can supply a stable `capture_id`:
+
+```bash
+curl -X POST http://localhost:8000/memories \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "messages": [{"role": "user", "content": "Project A uses Redis for its expiring cache."}],
+    "user_id": "user-1",
+    "infer": false,
+    "capture_id": "session-42:decision-3",
+    "metadata": {"project_id": "project-a", "source": "pepi", "observed_at": "2026-11-18T10:00:00Z"}
+  }'
+```
+
+Successful writes include `write_status: "saved"`; a valid selection with no new
+memories returns `write_status: "skipped"`, `skip_reason: "no_new_memories"`, and
+an empty `results` list. The strict compatibility boundary detects extraction,
+embedding, and primary-storage errors that the pinned SDK can otherwise hide.
+These return HTTP `503` with `detail.code: "memory_write_failed"` and an explicit
+`retryable` boolean. Optional entity enrichment and audit-history fallbacks
+remain SDK behavior; a saved acknowledgement concerns the primary memory write.
+
+Capture IDs are scoped by the storage target and the exact user/agent/run
+identifiers. PostgreSQL connection-string overrides and schema/role options
+are included in target identity; credentials and tuning are excluded. Opaque
+clients/pools or unresolved targets return HTTP `400` when a capture ID is
+supplied, rather than sharing an unsafe receipt namespace.
+Completed captures replay their acknowledgement without another
+write, including after restart. Opt-in capture responses contain `results`
+entries with IDs and events, plus the outcome and capture ID. Receipts retain
+only the acknowledgement, not memory text or the original request; read memory
+details through the normal memory endpoints. A replay reports the original
+operation and does not establish that a subsequently edited/deleted record is
+still present. Reusing a capture ID with a changed request
+returns HTTP `409` with `detail.code: "capture_conflict"`. Store the original
+request in the client's outbox and resend it unchanged; generated anchor
+timestamps do not affect the request fingerprint.
+
+Receipts live in `MEM0_WRITE_DB_PATH` (default `/var/lib/mem0/writes.db`). The
+Docker Compose history volume already persists that directory. Workers must
+share this file; separate instances with separate files do not coordinate
+idempotency. Keep the receipt database for as long as clients may retry captures.
+
+SQLite receipts and the vector store do not share a transaction. If the process
+stops after starting persistence but before recording the result, retries return
+HTTP `409` with `detail.code: "capture_pending"` and state `pending` or `unknown`.
+They are not automatically re-executed after a timeout. Reconcile those captures
+against the scoped memories carrying `metadata.capture_id` before resolving a
+receipt or issuing another write. Only failures known to precede primary
+persistence are automatically retryable. This prevents duplicate writes without
+claiming crash-atomic delivery across two databases.
+
+Clients without a `capture_id` retain the ordinary write path and do not create
+receipts. Pepi still needs to transmit completed evidence, capture IDs, and
+provenance and to handle retryable failures; this backend change does not alter
+its extension or enable compaction-summary storage.
+
+### Eligibility for agent recall
+
+`/search`, `/retrieve`, and `/query` exclude explicitly non-injectable memories
+(`inject: false`), `type: "noise"`, and archives (`cold_context: true`,
+`type: "compaction-archive"`, or `tier: "cold"`/`"archive"`) from ordinary
+recall. Older records without these flags remain eligible. Filtering occurs
+before final selection; candidate fetching can expand to 200 records when
+excluded entries occupy the initial result slots.
+
+For deliberate archive inspection, `/search` and `/retrieve` accept
+`filters: {"include_cold_context": true}`. This allows archive entries even when
+their archive writer set `inject: false`; it never admits noise or non-archive
+records explicitly marked non-injectable. The control must be a JSON boolean
+and is not forwarded as a metadata filter. `/query` uses ordinary eligibility
+and has no archive opt-in. Direct memory reads and admin views remain available
+for inspecting stored records.
 
 ### What `/search` does today
 

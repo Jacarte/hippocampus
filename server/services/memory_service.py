@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import hashlib
+import json
 from typing import Any
 
 from fastapi import FastAPI
@@ -8,6 +10,7 @@ from fastapi import FastAPI
 from api_models import MemoryCreate, RetrieveRequest, SearchRequest
 
 from .anchor_service import AnchorService
+from .mem0_compat import MemoryWriteError, add_memories
 from .metrics import (
     memory_operation_errors_total,
     memory_operations_total,
@@ -17,6 +20,7 @@ from .metrics import (
 from .retrieval_service import RetrievalService
 from .runtime import initialize_memory
 from .tracing import current_request_id, trace_backend_operation
+from .write_receipts import WriteReceiptStore
 
 
 class MemoryService:
@@ -25,9 +29,11 @@ class MemoryService:
         *,
         retrieval_service: RetrievalService,
         anchor_service: AnchorService,
+        write_receipts: WriteReceiptStore | None = None,
     ) -> None:
         self._retrieval_service = retrieval_service
         self._anchor_service = anchor_service
+        self._write_receipts = write_receipts or WriteReceiptStore()
 
     @contextmanager
     def _track_op(
@@ -65,7 +71,10 @@ class MemoryService:
             )
             return {"message": "Configuration set successfully"}
 
-    def add(self, memory_instance: Any, payload: MemoryCreate) -> Any:
+    def add(
+        self, memory_instance: Any, payload: MemoryCreate,
+        *, runtime_config: dict[str, Any] | None = None,
+    ) -> Any:
         with self._track_op(
             "add",
             user_id=payload.user_id or "",
@@ -90,7 +99,12 @@ class MemoryService:
                 "agent_id": payload.agent_id,
                 "run_id": payload.run_id,
                 "metadata": prepared_metadata,
+                "infer": payload.infer,
             }
+            if payload.capture_id is not None:
+                params["metadata"] = {
+                    **(prepared_metadata or {}), "capture_id": payload.capture_id,
+                }
             cleaned_params = {
                 key: value for key, value in params.items() if value is not None
             }
@@ -101,11 +115,211 @@ class MemoryService:
                 message_count=len(payload.messages),
                 has_metadata=payload.metadata is not None,
             )
-            response = memory_instance.add(
-                messages=[message.model_dump() for message in payload.messages],
-                **cleaned_params,
+            claim = None
+            if payload.capture_id is not None:
+                claim = self._write_receipts.claim(
+                    payload.capture_id,
+                    namespace=self._write_namespace(
+                        getattr(memory_instance, "config", None) or runtime_config or {},
+                    ),
+                    identifiers={
+                        "user_id": payload.user_id,
+                        "agent_id": payload.agent_id,
+                        "run_id": payload.run_id,
+                    },
+                    # Fingerprint original client input, not generated anchor times.
+                    payload=payload.model_dump(mode="json"),
+                )
+                if claim.replayed:
+                    return {**claim.response, "capture_id": payload.capture_id}
+            try:
+                response = add_memories(
+                    memory_instance,
+                    messages=[message.model_dump() for message in payload.messages],
+                    **cleaned_params,
+                )
+                response = self._write_result(
+                    self._anchor_service.normalize_payload(response), payload.capture_id,
+                )
+                if claim is not None:
+                    self._write_receipts.complete(
+                        claim, {key: value for key, value in response.items() if key != "capture_id"},
+                    )
+                return response
+            except Exception as exc:
+                if claim is not None:
+                    self._write_receipts.fail(
+                        claim,
+                        retryable=isinstance(exc, MemoryWriteError) and exc.retryable,
+                    )
+                raise
+
+    @staticmethod
+    def _write_namespace(config: Any) -> str:
+        import os
+        import shlex
+        from urllib.parse import parse_qsl, unquote, urlsplit
+
+        if hasattr(config, "model_dump"):
+            # Preserve opaque values long enough to reject them explicitly.
+            config = config.model_dump(mode="python")
+        if not isinstance(config, dict):
+            raise ValueError("Cannot identify the memory storage target for capture_id.")
+        vector_store = config.get("vector_store", {})
+        settings = vector_store.get("config", {})
+        provider = vector_store.get("provider")
+        if not provider or not isinstance(settings, dict):
+            raise ValueError("Cannot identify the memory storage target for capture_id.")
+        if any(settings.get(key) is not None for key in ("connection_pool", "client")):
+            raise ValueError(
+                "capture_id requires an explicit storage target; opaque clients or "
+                "connection pools cannot be identified safely."
             )
-            return self._anchor_service.normalize_payload(response)
+
+        if provider == "pgvector":
+            from psycopg.conninfo import conninfo_to_dict
+
+            # PGVector gives connection_string precedence over individual fields.
+            if settings.get("connection_string"):
+                try:
+                    connection = conninfo_to_dict(settings["connection_string"])
+                except Exception:
+                    raise ValueError("Cannot identify the PostgreSQL connection target.") from None
+                if connection.get("service") or os.environ.get("PGSERVICE"):
+                    raise ValueError("capture_id cannot identify a PostgreSQL service-file target.")
+                # libpq applies these environment defaults to omitted DSN fields.
+                for key, variable in {
+                    "host": "PGHOST", "hostaddr": "PGHOSTADDR", "port": "PGPORT",
+                    "dbname": "PGDATABASE", "user": "PGUSER", "options": "PGOPTIONS",
+                }.items():
+                    if key not in connection and os.environ.get(variable):
+                        connection[key] = os.environ[variable]
+            else:
+                connection = settings
+            if not (connection.get("host") or connection.get("hostaddr")) or not connection.get("user"):
+                raise ValueError("capture_id requires an explicit PostgreSQL host and user.")
+            target_config = {
+                key: str(connection[key])
+                for key in ("host", "hostaddr", "user") if connection.get(key)
+            }
+            target_config["port"] = str(connection.get("port") or "5432")
+            target_config["dbname"] = str(connection.get("dbname") or connection["user"])
+            target_config["collection_name"] = settings.get("collection_name", "mem0")
+            # Only session settings that change table/tenant resolution belong
+            # in the target; statement_timeout and other tuning do not.
+            try:
+                options = iter(shlex.split(connection.get("options") or ""))
+                for option in options:
+                    if option == "-c":
+                        assignment = next(options)
+                    elif option.startswith("-c"):
+                        assignment = option[2:]
+                    elif option.startswith("--"):
+                        assignment = option[2:]
+                    else:
+                        raise ValueError
+                    name, value = assignment.split("=", 1)
+                    name = name.replace("-", "_")
+                    if name in {"search_path", "role", "session_authorization"}:
+                        target_config[name] = value
+            except (TypeError, ValueError, StopIteration):
+                raise ValueError("Cannot identify PostgreSQL session target options.") from None
+            for key in ("schema", "search_path", "role"):
+                if connection.get(key) is not None:
+                    target_config[key] = connection[key]
+            target = {"provider": provider, "config": target_config}
+            encoded = json.dumps(target, sort_keys=True, separators=(",", ":"))
+            return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+        if settings.get("connection_string"):
+            raise ValueError("capture_id cannot identify this provider's connection_string target.")
+
+        def url_target(value: Any) -> dict[str, Any]:
+            if not isinstance(value, str) or not value:
+                raise ValueError("Cannot identify the memory storage URL target.")
+            try:
+                parsed = urlsplit(value if "://" in value else "//" + value)
+                if not parsed.hostname and parsed.scheme != "file":
+                    raise ValueError
+                query: dict[str, list[str]] = {}
+                for key, item in parse_qsl(parsed.query, keep_blank_values=True):
+                    normalized = key.casefold().replace("-", "_")
+                    if any(secret in normalized for secret in (
+                        "password", "secret", "token", "api_key", "authorization", "signature",
+                    )) or normalized in {"sig", "access_key"}:
+                        continue
+                    query.setdefault(key, []).append(item)
+                return {
+                    "scheme": parsed.scheme,
+                    "host": parsed.hostname,
+                    "port": parsed.port or {"http": 80, "https": 443}.get(parsed.scheme),
+                    "user": unquote(parsed.username) if parsed.username else None,
+                    "path": parsed.path,
+                    "query": query,
+                }
+            except (TypeError, ValueError):
+                raise ValueError("Cannot identify the memory storage URL target.") from None
+
+        # Use storage identity, not tuning or credentials: changing hnsw or
+        # rotating a password must not make an old capture executable again.
+        locator_keys = {
+            "host", "port", "url", "uri", "path", "dbname", "database",
+            "db_name", "schema", "collection_name", "collection", "index_name",
+            "index", "namespace", "project_id", "project", "region", "bucket",
+            "table_name", "container_name", "account_url", "endpoint",
+        }
+        target_config = {
+            key: url_target(value) if key in {"url", "uri", "account_url", "endpoint"} else value
+            for key, value in settings.items()
+            if key in locator_keys and value is not None
+        }
+        if not target_config or not any(key in target_config for key in (
+            "host", "url", "uri", "path", "database", "dbname", "db_name",
+            "project_id", "project", "bucket", "account_url", "endpoint",
+        )):
+            if provider != "qdrant":
+                raise ValueError("Cannot identify an explicit memory storage target for capture_id.")
+            # The known Qdrant default remains compatible with minimal configs.
+            target_config["path"] = "/tmp/qdrant"
+        target = {"provider": provider, "config": target_config}
+        encoded = json.dumps(target, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _write_result(response: Any, capture_id: str | None) -> dict[str, Any]:
+        if isinstance(response, list):
+            response = {"results": response}
+        if not isinstance(response, dict):
+            raise MemoryWriteError("Memory backend returned an unrecognized write result.")
+        response = dict(response)
+        if isinstance(response.get("results"), list):
+            records = response["results"]
+        elif response.get("id") or response.get("memory_id"):
+            records = [response]
+        else:
+            raise MemoryWriteError("Memory backend returned an unrecognized write result.")
+        if any(
+            not isinstance(record, dict) or not (record.get("id") or record.get("memory_id"))
+            for record in records
+        ):
+            raise MemoryWriteError("Memory backend did not identify its persisted results.")
+        response["write_status"] = "saved" if records else "skipped"
+        if not records:
+            response["skip_reason"] = "no_new_memories"
+        if capture_id is not None:
+            # The new opt-in contract is a stable acknowledgement, not another
+            # retained copy of memory text that could outlive a later deletion.
+            response = {
+                "results": [
+                    {"id": record.get("id") or record["memory_id"],
+                     "event": record.get("event", "ADD")}
+                    for record in records
+                ],
+                "write_status": response["write_status"],
+                "capture_id": capture_id,
+                **({"skip_reason": "no_new_memories"} if not records else {}),
+            }
+        return response
 
     def get_all(
         self,
