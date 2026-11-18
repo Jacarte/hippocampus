@@ -14,10 +14,12 @@ from pytest import MonkeyPatch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from services.retrieval_service import RetrievalService
+from services.memory_policy import DEFAULT_MEMORY_INSTRUCTIONS
 
 
 def test_health_and_configure_smoke_without_live_dependencies(monkeypatch: MonkeyPatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("MEM0_CUSTOM_INSTRUCTIONS", raising=False)
 
     server = importlib.import_module("server")
     server = importlib.reload(server)
@@ -64,10 +66,11 @@ def test_health_and_configure_smoke_without_live_dependencies(monkeypatch: Monke
 
     assert configure_response.status_code == 200
     assert configure_response.json() == {"message": "Configuration set successfully"}
-    assert created_configs == [config]
+    effective_config = {**config, "custom_instructions": DEFAULT_MEMORY_INSTRUCTIONS}
+    assert created_configs == [effective_config]
     assert isinstance(app.state.memory, FakeMemory)
-    assert app.state.memory.config == config
-    assert app.state.memory_config == config
+    assert app.state.memory.config == effective_config
+    assert app.state.memory_config == effective_config
 
 
 def test_configure_logs_redact_sensitive_runtime_config(
@@ -2137,6 +2140,7 @@ def test_initialize_memory_sets_runtime_state_without_indexing_service(
 ):
     """Initialization stores memory state without an indexing handoff."""
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("MEM0_CUSTOM_INSTRUCTIONS", raising=False)
 
     server = importlib.import_module("server")
     server = importlib.reload(server)
@@ -2159,4 +2163,6 @@ def test_initialize_memory_sets_runtime_state_without_indexing_service(
     server.initialize_memory(app, config=config)
 
     assert isinstance(app.state.memory, FakeMemory)
-    assert app.state.memory_config == config
+    assert app.state.memory_config == {
+        **config, "custom_instructions": DEFAULT_MEMORY_INSTRUCTIONS,
+    }

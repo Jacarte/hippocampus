@@ -27,6 +27,8 @@ from api_models import (
 from services.admin_service import AdminService
 from services.anchor_service import AnchorService
 from services.memory_service import MemoryService
+from services.mem0_compat import MemoryWriteError
+from services.write_receipts import WriteConflictError, WritePendingError
 from services.query_service import QueryService
 from services.retrieval_service import RetrievalService
 from services.runtime import (
@@ -160,7 +162,8 @@ def create_app(
         response = _execute_service_call(
             "add_memory",
             lambda: request.app.state.memory_service.add(
-                memory_instance, memory_create
+                memory_instance, memory_create,
+                runtime_config=request.app.state.memory_config,
             ),
         )
         return JSONResponse(content=response)
@@ -654,6 +657,20 @@ def create_app(
 def _execute_service_call(operation: str, handler: Any) -> Any:
     try:
         return handler()
+    except (WriteConflictError, WritePendingError) as exc:
+        raise HTTPException(status_code=409, detail={
+            "code": exc.code,
+            "message": str(exc),
+            "state": getattr(exc, "state", None),
+            "retryable": False,
+        }) from exc
+    except MemoryWriteError as exc:
+        trace_backend_error(operation, exc)
+        raise HTTPException(status_code=503, detail={
+            "code": "memory_write_failed",
+            "message": str(exc),
+            "retryable": exc.retryable,
+        }) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:

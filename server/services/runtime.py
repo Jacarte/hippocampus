@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 
+from .memory_policy import DEFAULT_MEMORY_INSTRUCTIONS
 from .tracing import trace_backend_operation
 
 
@@ -42,6 +43,8 @@ def get_config_from_env() -> dict[str, Any]:
         * ``embedder`` — provider + config dict with model, api_key.
         * ``history_db_path`` — path to the history SQLite store.
         * ``visit_db_path`` — path to the visit telemetry SQLite store.
+        * ``custom_instructions`` — shared extraction policy, overridable with
+          ``MEM0_CUSTOM_INSTRUCTIONS`` (an empty value disables the addition).
     """
     config: dict[str, Any] = {"version": "v1.1"}
 
@@ -119,6 +122,9 @@ def get_config_from_env() -> dict[str, Any]:
     config["visit_db_path"] = os.environ.get(
         "MEM0_VISIT_DB_PATH", "/var/lib/mem0/visits.db"
     )
+    config["custom_instructions"] = os.environ.get(
+        "MEM0_CUSTOM_INSTRUCTIONS", DEFAULT_MEMORY_INSTRUCTIONS
+    )
     return config
 
 
@@ -175,7 +181,11 @@ def initialize_memory(app: FastAPI, config: dict[str, Any] | None = None) -> Any
     """Build a mem0 instance and install it as the application's runtime state.
 
     A non-empty explicit *config* takes precedence; ``None`` or an empty dict
-    reloads configuration from the environment.  The function replaces
+    reloads configuration from the environment. If ``custom_instructions`` is
+    omitted, use ``MEM0_CUSTOM_INSTRUCTIONS`` or the checked-in policy. An
+    explicit string (including an empty string) or ``None`` takes precedence;
+    empty/null values retain the SDK's native extraction instructions only.
+    The caller's config is not mutated. The function replaces
     ``app.state.memory`` and ``app.state.memory_config`` only after memory
     construction succeeds, so a failure leaves any existing runtime state
     unchanged.
@@ -188,7 +198,11 @@ def initialize_memory(app: FastAPI, config: dict[str, Any] | None = None) -> Any
         ValueError: If an environment-backed numeric setting is invalid.
         AttributeError: If the application has no ``memory_factory`` state.
     """
-    resolved_config = config or get_config_from_env()
+    resolved_config = dict(config) if config else get_config_from_env()
+    resolved_config.setdefault(
+        "custom_instructions",
+        os.environ.get("MEM0_CUSTOM_INSTRUCTIONS", DEFAULT_MEMORY_INSTRUCTIONS),
+    )
     memory_instance = build_memory_instance(resolved_config, app.state.memory_factory)
     app.state.memory = memory_instance
     app.state.memory_config = resolved_config
