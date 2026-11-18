@@ -30,7 +30,7 @@ from services.memory_service import MemoryService
 from services.mem0_compat import MemoryWriteError
 from services.write_receipts import WriteConflictError, WritePendingError
 from services.query_service import QueryService
-from services.retrieval_service import RetrievalService
+from services.retrieval_service import RetrievalService, get_decay_settings_from_env
 from services.runtime import (
     MemoryFactory,
     get_memory_instance,
@@ -64,11 +64,19 @@ def create_app(
     app.state.memory_factory = memory_factory
     app.state.memory = None
     app.state.memory_config = None
+    # One shared RetrievalService so ranking configuration cannot diverge
+    # between endpoints.  Safe to share: it holds configuration only, with no
+    # per-request mutable state.  Decay settings are read here, at app
+    # construction, so tests can set the env before calling create_app.
+    decay_enabled, decay_weight = get_decay_settings_from_env()
+    _retrieval = RetrievalService(
+        decay_enabled=decay_enabled,
+        decay_weight=decay_weight,
+    )
     app.state.memory_service = MemoryService(
-        retrieval_service=RetrievalService(),
+        retrieval_service=_retrieval,
         anchor_service=AnchorService(),
     )
-    _retrieval = RetrievalService()
     app.state.query_service = QueryService(retrieval_service=_retrieval)
     app.state.admin_service = AdminService()
 

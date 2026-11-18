@@ -3,17 +3,24 @@ import json
 import logging
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
 from pytest import LogCaptureFixture
 from pytest import MonkeyPatch
+from pytest import approx
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from services.retrieval_service import RetrievalService
+from services.retrieval_service import (
+    DEFAULT_DECAY_WEIGHT,
+    HeuristicReranker,
+    RetrievalService,
+    get_decay_settings_from_env,
+)
 from services.memory_policy import DEFAULT_MEMORY_INSTRUCTIONS
 
 
@@ -962,6 +969,8 @@ def test_retrieve_returns_fused_ranked_results_with_capabilities(
     caplog: LogCaptureFixture,
 ):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    # Pin the baseline ranking regardless of the ambient deployment env.
+    monkeypatch.delenv("MEM0_RETRIEVAL_DECAY_ENABLED", raising=False)
 
     server = importlib.import_module("server")
     server = importlib.reload(server)
@@ -1064,6 +1073,8 @@ def test_retrieve_returns_fused_ranked_results_with_capabilities(
         "semantic": True,
         "rerank": True,
         "anchors": True,
+        # Decay ranking is opt-in and this app was built without the env var.
+        "decay": False,
     }
     assert payload["degraded"] is False
     assert payload["degradation_reasons"] == []
@@ -1155,6 +1166,7 @@ def test_retrieve_degrades_to_lexical_results_when_semantic_fails(
         "semantic": False,
         "rerank": False,
         "anchors": True,
+        "decay": False,
     }
     assert payload["degraded"] is True
     assert payload["degradation_reasons"] == ["semantic_unavailable", "rerank_skipped"]
@@ -1322,6 +1334,7 @@ def test_retrieve_returns_fused_results_when_rerank_fails(monkeypatch: MonkeyPat
         "semantic": True,
         "rerank": False,
         "anchors": True,
+        "decay": False,
     }
     assert payload["degraded"] is True
     assert payload["degradation_reasons"] == ["rerank_unavailable"]
@@ -1538,7 +1551,7 @@ def test_regression_retrieve_backend_capabilities_field_contract(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Regression: /retrieve response must carry backend_capabilities with exactly the
-    four boolean keys: lexical, semantic, rerank, anchors.
+    five boolean keys: lexical, semantic, rerank, anchors, decay.
     """
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
@@ -1573,6 +1586,7 @@ def test_regression_retrieve_backend_capabilities_field_contract(
         "semantic",
         "rerank",
         "anchors",
+        "decay",
     }, f"backend_capabilities keys mismatch: {set(caps.keys())}"
     for key, value in caps.items():
         assert isinstance(value, bool), (
@@ -1855,7 +1869,7 @@ def test_regression_retrieve_trace_retrieval_contains_backend_capabilities(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Regression: /retrieve trace.retrieval must carry a backend_capabilities sub-dict
-    mirroring the top-level backend_capabilities (all four boolean keys).
+    mirroring the top-level backend_capabilities (all five boolean keys).
     """
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
@@ -1919,6 +1933,7 @@ def test_regression_retrieve_trace_retrieval_contains_backend_capabilities(
         "semantic",
         "rerank",
         "anchors",
+        "decay",
     }, f"trace.retrieval.backend_capabilities keys mismatch: {set(caps_in_trace.keys())}"
     for key, val in caps_in_trace.items():
         assert isinstance(val, bool), (
@@ -2165,4 +2180,407 @@ def test_initialize_memory_sets_runtime_state_without_indexing_service(
     assert isinstance(app.state.memory, FakeMemory)
     assert app.state.memory_config == {
         **config, "custom_instructions": DEFAULT_MEMORY_INSTRUCTIONS,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Env-gated recency-decay ranking for /retrieve
+# ---------------------------------------------------------------------------
+
+
+def _iso_days_ago(days: float) -> str:
+    """Return an ISO-8601 UTC timestamp ``days`` in the past."""
+    return (
+        datetime.now(timezone.utc) - timedelta(days=days)
+    ).isoformat().replace("+00:00", "Z")
+
+
+def test_decay_settings_default_to_disabled(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.delenv("MEM0_RETRIEVAL_DECAY_ENABLED", raising=False)
+    monkeypatch.delenv("MEM0_RETRIEVAL_DECAY_WEIGHT", raising=False)
+
+    assert get_decay_settings_from_env() == (False, DEFAULT_DECAY_WEIGHT)
+
+
+def test_decay_settings_read_enabled_flag_and_weight(monkeypatch: MonkeyPatch) -> None:
+    monkeypatch.setenv("MEM0_RETRIEVAL_DECAY_ENABLED", "true")
+    monkeypatch.setenv("MEM0_RETRIEVAL_DECAY_WEIGHT", "0.25")
+
+    assert get_decay_settings_from_env() == (True, 0.25)
+
+
+def test_decay_weight_falls_back_to_default_when_invalid(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A malformed or negative weight is ignored rather than raising."""
+    monkeypatch.setenv("MEM0_RETRIEVAL_DECAY_ENABLED", "true")
+
+    monkeypatch.setenv("MEM0_RETRIEVAL_DECAY_WEIGHT", "not-a-number")
+    assert get_decay_settings_from_env() == (True, DEFAULT_DECAY_WEIGHT)
+
+    monkeypatch.setenv("MEM0_RETRIEVAL_DECAY_WEIGHT", "-1.0")
+    assert get_decay_settings_from_env() == (True, DEFAULT_DECAY_WEIGHT)
+
+
+def test_reranker_recency_score_is_neutral_without_created_at() -> None:
+    reranker = HeuristicReranker(decay_enabled=True)
+    now = datetime.now(timezone.utc).timestamp()
+
+    # ``updated_at`` must not stand in for ``created_at``: editing a memory
+    # should not reset its decay curve.
+    candidate = {
+        "id": "mem-undated",
+        "metadata": {"type": "procedure"},
+        "updated_at": _iso_days_ago(0),
+    }
+
+    assert reranker._recency_score(candidate, now_timestamp=now) == 0.5
+
+
+def test_reranker_recency_score_halves_after_one_half_life() -> None:
+    reranker = HeuristicReranker(decay_enabled=True)
+    now = datetime.now(timezone.utc).timestamp()
+
+    # ``procedure`` derives a 7-day half-life, so a 7-day-old memory sits at 0.5.
+    candidate = {
+        "id": "mem-aged",
+        "metadata": {"type": "procedure", "created_at": _iso_days_ago(7)},
+    }
+
+    assert reranker._recency_score(candidate, now_timestamp=now) == approx(0.5, abs=1e-4)
+
+
+def test_reranker_recency_score_prefers_top_level_created_at() -> None:
+    reranker = HeuristicReranker(decay_enabled=True)
+    now = datetime.now(timezone.utc).timestamp()
+
+    candidate = {
+        "id": "mem-top-level",
+        "created_at": _iso_days_ago(0),
+        "metadata": {"type": "procedure", "created_at": _iso_days_ago(700)},
+    }
+
+    assert reranker._recency_score(candidate, now_timestamp=now) == approx(1.0, abs=1e-4)
+
+
+def test_reranker_recency_score_quarters_expired_ttl() -> None:
+    reranker = HeuristicReranker(decay_enabled=True)
+    now = datetime.now(timezone.utc).timestamp()
+
+    candidate = {
+        "id": "mem-expired",
+        "metadata": {
+            "type": "procedure",
+            "created_at": _iso_days_ago(7),
+            "ttl_expires_at": _iso_days_ago(1),
+        },
+    }
+
+    # 0.5 after one half-life, quartered by the expired TTL.
+    assert reranker._recency_score(candidate, now_timestamp=now) == approx(
+        0.125, abs=1e-4
+    )
+
+
+def test_reranker_recency_score_ignores_future_ttl() -> None:
+    reranker = HeuristicReranker(decay_enabled=True)
+    now = datetime.now(timezone.utc).timestamp()
+
+    candidate = {
+        "id": "mem-live-ttl",
+        "metadata": {
+            "type": "procedure",
+            "created_at": _iso_days_ago(7),
+            "ttl_expires_at": _iso_days_ago(-30),
+        },
+    }
+
+    assert reranker._recency_score(candidate, now_timestamp=now) == approx(
+        0.5, abs=1e-4
+    )
+
+
+def test_reranker_explicit_half_life_overrides_type_default() -> None:
+    reranker = HeuristicReranker(decay_enabled=True)
+    now = datetime.now(timezone.utc).timestamp()
+
+    # ``problem-fix`` would derive 4 days; the explicit 100-day half-life wins,
+    # so a 4-day-old memory stays near the top of the curve instead of at 0.5.
+    candidate = {
+        "id": "mem-explicit-half-life",
+        "metadata": {
+            "type": "problem-fix",
+            "created_at": _iso_days_ago(4),
+            "decay_half_life_days": 100,
+        },
+    }
+
+    assert reranker._recency_score(candidate, now_timestamp=now) == approx(
+        0.5 ** (4 / 100), abs=1e-4
+    )
+
+
+def test_reranker_ignores_non_positive_half_life() -> None:
+    """A zero half-life has no meaningful curve, so the type default applies."""
+    reranker = HeuristicReranker(decay_enabled=True)
+    now = datetime.now(timezone.utc).timestamp()
+
+    candidate = {
+        "id": "mem-zero-half-life",
+        "metadata": {
+            "type": "procedure",
+            "created_at": _iso_days_ago(7),
+            "decay_half_life_days": 0,
+        },
+    }
+
+    assert reranker._recency_score(candidate, now_timestamp=now) == approx(
+        0.5, abs=1e-4
+    )
+
+
+def test_reranker_malformed_timestamps_do_not_raise() -> None:
+    """One unparseable record must not fail the whole rerank stage."""
+    reranker = HeuristicReranker(decay_enabled=True)
+
+    candidates = [
+        {
+            "id": "mem-bad-created",
+            "memory": "malformed created timestamp",
+            "score": 0.5,
+            "metadata": {"type": "procedure", "created_at": "not-a-timestamp"},
+        },
+        {
+            "id": "mem-bad-ttl",
+            "memory": "malformed ttl timestamp",
+            "score": 0.4,
+            "metadata": {
+                "type": "procedure",
+                "created_at": _iso_days_ago(1),
+                "ttl_expires_at": "31-12-1999",
+            },
+        },
+        {
+            "id": "mem-non-string-created",
+            "memory": "numeric created timestamp",
+            "score": 0.3,
+            "metadata": {"type": "procedure", "created_at": 1234567890},
+        },
+    ]
+
+    reranked = reranker.rerank(query="malformed", candidates=candidates)
+
+    assert [candidate["id"] for candidate in reranked] == [
+        "mem-bad-created",
+        "mem-bad-ttl",
+        "mem-non-string-created",
+    ]
+    # The unparseable ``created_at`` falls back to neutral recency: base 0.5
+    # + one overlapping token + phrase bonus + neutral-recency decay term.
+    assert reranked[0]["score"] == approx(
+        0.5 + 0.005 + 0.02 + (0.5 * DEFAULT_DECAY_WEIGHT), abs=1e-6
+    )
+
+
+def test_reranker_disabled_decay_leaves_scores_untouched() -> None:
+    """With decay off, scoring must not read timestamps at all."""
+    disabled = HeuristicReranker()
+    candidates = [
+        {
+            "id": "mem-old",
+            "memory": "decay ranking candidate",
+            "score": 0.5,
+            "metadata": {"type": "procedure", "created_at": _iso_days_ago(365)},
+        }
+    ]
+
+    reranked = disabled.rerank(query="decay ranking", candidates=candidates)
+
+    # base 0.5 + 2 overlapping tokens * 0.005 + phrase bonus 0.02, no decay term.
+    assert reranked[0]["score"] == approx(0.5 + 0.01 + 0.02, abs=1e-6)
+
+
+def _make_decay_ordering_memory_class() -> "type":
+    """Return a FakeMemory whose semantic stage ranks the older memory first.
+
+    Both records share a type and an identical semantic score, so the only
+    signal that can reorder them is recency.  The stored text deliberately
+    shares no tokens with the query so the lexical stage returns nothing and
+    fusion ranks purely by semantic position.
+    """
+    older = {
+        "id": "mem-older",
+        "memory": "zzz alpha placeholder body",
+        "metadata": {
+            "type": "procedure",
+            "scope": "project",
+            "created_at": _iso_days_ago(120),
+        },
+    }
+    newer = {
+        "id": "mem-newer",
+        "memory": "zzz beta placeholder body",
+        "metadata": {
+            "type": "procedure",
+            "scope": "project",
+            "created_at": _iso_days_ago(0),
+        },
+    }
+
+    class FakeMemory:
+        def __init__(self, config: "dict[str, Any]") -> None:
+            self.config = config
+            self.records = {"mem-older": older, "mem-newer": newer}
+
+        def get_all(self, **_: "Any") -> "list[dict[str, Any]]":
+            return list(self.records.values())
+
+        def search(self, **_: "Any") -> "dict[str, Any]":
+            # Equal scores; the older memory is returned first so it wins the
+            # fused ranking unless decay demotes it.
+            return {
+                "results": [
+                    {**older, "score": 0.9},
+                    {**newer, "score": 0.9},
+                ]
+            }
+
+    return FakeMemory
+
+
+def _retrieve_decay_ordering(monkeypatch: MonkeyPatch) -> "dict[str, Any]":
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    app = server.create_app(
+        memory_factory=_make_decay_ordering_memory_class(), startup_enabled=False
+    )
+
+    with TestClient(app) as client:
+        assert client.post("/configure", json=_MINIMAL_CONFIG).status_code == 200
+        response = client.post(
+            "/retrieve",
+            json={
+                "query": "unmatched retrieval query",
+                "scopes": ["project"],
+                "user_id": "user-1",
+            },
+        )
+
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_retrieve_ordering_unchanged_when_decay_disabled(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MEM0_RETRIEVAL_DECAY_ENABLED", raising=False)
+    monkeypatch.delenv("MEM0_RETRIEVAL_DECAY_WEIGHT", raising=False)
+
+    payload = _retrieve_decay_ordering(monkeypatch)
+
+    assert [result["id"] for result in payload["results"]] == [
+        "mem-older",
+        "mem-newer",
+    ]
+    assert payload["backend_capabilities"]["decay"] is False
+
+
+def test_retrieve_demotes_older_memory_when_decay_enabled(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """With decay on, a much older memory falls below an equally scored newer one."""
+    monkeypatch.setenv("MEM0_RETRIEVAL_DECAY_ENABLED", "true")
+    monkeypatch.setenv("MEM0_RETRIEVAL_DECAY_WEIGHT", "0.5")
+
+    payload = _retrieve_decay_ordering(monkeypatch)
+
+    assert [result["id"] for result in payload["results"]] == [
+        "mem-newer",
+        "mem-older",
+    ]
+    assert payload["backend_capabilities"]["decay"] is True
+
+
+def test_retrieve_decay_capability_is_false_when_rerank_fails(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Decay reaches ranking only via rerank, so a failed rerank reports no decay."""
+    monkeypatch.setenv("MEM0_RETRIEVAL_DECAY_ENABLED", "true")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    class FailingReranker:
+        decay_enabled = True
+
+        def rerank(
+            self, *, query: str, candidates: "list[dict[str, Any]]"
+        ) -> "list[dict[str, Any]]":
+            raise RuntimeError("rerank offline")
+
+    app = server.create_app(
+        memory_factory=_make_decay_ordering_memory_class(), startup_enabled=False
+    )
+    app.state.memory_service._retrieval_service._reranker = FailingReranker()
+
+    with TestClient(app) as client:
+        assert client.post("/configure", json=_MINIMAL_CONFIG).status_code == 200
+        response = client.post(
+            "/retrieve",
+            json={
+                "query": "unmatched retrieval query",
+                "scopes": ["project"],
+                "user_id": "user-1",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["backend_capabilities"]["rerank"] is False
+    assert payload["backend_capabilities"]["decay"] is False
+
+
+def test_create_app_shares_one_retrieval_service(monkeypatch: MonkeyPatch) -> None:
+    """Ranking config must not diverge between /retrieve and /query."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("MEM0_RETRIEVAL_DECAY_ENABLED", "true")
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    FakeMemory = _make_fake_memory_class_with_records(_SAMPLE_RECORDS)
+    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+
+    assert (
+        app.state.memory_service._retrieval_service
+        is app.state.query_service._retrieval
+    )
+    assert app.state.memory_service._retrieval_service._decay_ranking_enabled is True
+
+
+def test_query_capabilities_does_not_advertise_decay(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """/query ranking is unchanged, so its capability contract must not grow."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("MEM0_RETRIEVAL_DECAY_ENABLED", "true")
+
+    server = importlib.import_module("server")
+    server = importlib.reload(server)
+
+    FakeMemory = _make_fake_memory_class_with_records(_SAMPLE_RECORDS)
+    app = server.create_app(memory_factory=FakeMemory, startup_enabled=False)
+
+    with TestClient(app) as client:
+        response = client.get("/query/capabilities")
+
+    assert response.status_code == 200
+    assert response.json()["memory_store"] == {
+        "lexical": True,
+        "semantic": True,
+        "rerank": False,
     }

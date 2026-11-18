@@ -114,6 +114,9 @@ MEM0_VISIT_DB_PATH=/var/lib/mem0/visits.db
 MEM0_ADMIN_PAGE_SIZE_DEFAULT=20
 MEM0_ADMIN_PAGE_SIZE_MAX=100
 
+MEM0_RETRIEVAL_DECAY_ENABLED=false
+MEM0_RETRIEVAL_DECAY_WEIGHT=0.05
+
 MEM0_VECTOR_PROVIDER=pgvector
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
@@ -156,11 +159,48 @@ not share a universal key requirement or endpoint.
 
 The admin endpoints define the contract for an internal CMS operator tool. Key design decisions:
 
-- **Decay scores are NOT computed in the backend.** The backend exposes raw fields (`created_at`, `decay_half_life_days`, `total_visits`, `last_visited_at`, etc.), and the CMS uses them to compute display values such as decay and recency scores.
+- **Decay display values are NOT computed in the admin responses.** The backend exposes raw fields (`created_at`, `decay_half_life_days`, `total_visits`, `last_visited_at`, etc.), and the CMS uses them to compute display values such as decay and recency scores. Decay can separately influence `/retrieve` *ranking* when `MEM0_RETRIEVAL_DECAY_ENABLED` is on (see [Recency-decay ranking](#recency-decay-ranking-retrieve)); that flag does not change any admin response field.
 - **Popularity and freshness are separate signals.** Popularity comes from persisted visit telemetry (`total_visits`, `visit_ratio`). Freshness comes from `last_visited_at`, `created_at`, `decay_half_life_days`, and optional TTL fields. Never-visited items remain cold regardless of creation time.
 - **Visit recording is explicit.** Detail views do not implicitly record visits via GET. The CMS must call `POST /admin/memories/{memory_id}/visits` with the appropriate reason (`detail_open`, `edit_save`, `copy_source`).
 - **Audit stamps are applied server-side.** All CMS-initiated writes include `impersonated_by=admin`. Copy operations also include `copied_from` provenance metadata.
 - **Remove `MEM0_VISIT_DB_PATH`** to reset visit telemetry (data lives separately from memory metadata).
+
+### Recency-decay ranking (`/retrieve`)
+
+By default, `/retrieve` ranks on lexical score, semantic similarity, Reciprocal
+Rank Fusion, and the heuristic reranker's overlap/phrase/type bonuses. Memory age
+is not a ranking signal, so a stale memory can outrank a fresh one with the same
+relevance.
+
+Setting `MEM0_RETRIEVAL_DECAY_ENABLED=true` adds a recency term to the
+`/retrieve` reranking stage:
+
+```bash
+MEM0_RETRIEVAL_DECAY_ENABLED=true   # default false
+MEM0_RETRIEVAL_DECAY_WEIGHT=0.05    # default 0.05, must be >= 0
+```
+
+- The term is **additive**: `score += recency * MEM0_RETRIEVAL_DECAY_WEIGHT`.
+  `recency` is `0.5 ** (age_days / half_life_days)`, matching the CMS formula in
+  `cms/src/lib/decay.ts`. `MEM0_RETRIEVAL_DECAY_WEIGHT` bounds how much decay can
+  move a result; the sibling bonuses are 0.005-0.02, so start small and raise it
+  to make age more decisive.
+- Age is measured from `created_at` (top-level, else `metadata.created_at`), never
+  `updated_at`, so editing a memory does not reset its decay curve. A memory with
+  no parseable `created_at` gets a neutral `0.5`. An expired `metadata.ttl_expires_at`
+  multiplies `recency` by `0.25`. Unparseable timestamps are ignored rather than
+  failing the request.
+- Half-life comes from `metadata.decay_half_life_days` when it is a positive
+  number; otherwise it is derived from the memory type (`decision` and
+  `stable-fact` 30 days, `procedure` 7, `problem-fix` 4, default 4).
+- The `/retrieve` response advertises the active ranking via
+  `backend_capabilities.decay`, so clients can tell which ranking a deployment
+  uses. Because decay is applied inside the rerank stage, `decay` is `false`
+  whenever `rerank` is `false`.
+- **`/search` and `/query` ranking are unaffected** by this flag, and
+  `/query/capabilities` does not advertise decay.
+
+With the flag unset, ranking is byte-for-byte identical to the non-decay behavior.
 
 ### Running the CMS
 

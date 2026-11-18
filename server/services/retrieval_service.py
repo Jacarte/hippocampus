@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
+import os
 import re
 from collections import Counter
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from .tracing import (
@@ -17,6 +19,56 @@ from .metrics import (
     retrieval_degradations_total,
     retrieval_duration_seconds,
 )
+
+DECAY_ENABLED_ENV_VAR = "MEM0_RETRIEVAL_DECAY_ENABLED"
+DECAY_WEIGHT_ENV_VAR = "MEM0_RETRIEVAL_DECAY_WEIGHT"
+DEFAULT_DECAY_WEIGHT = 0.05
+
+
+def get_decay_settings_from_env() -> tuple[bool, float]:
+    """Read the ``/retrieve`` recency-decay ranking settings from the environment.
+
+    Decay ranking is opt-in: with ``MEM0_RETRIEVAL_DECAY_ENABLED`` unset the
+    returned flag is ``False`` and ``/retrieve`` ranking is byte-for-byte
+    identical to the non-decay behavior.
+
+    Returns:
+        A 2-tuple ``(decay_enabled, decay_weight)``.  ``decay_weight`` falls
+        back to :data:`DEFAULT_DECAY_WEIGHT` when
+        ``MEM0_RETRIEVAL_DECAY_WEIGHT`` is absent, unparseable as a float, or
+        negative; invalid values are logged and ignored rather than raising,
+        so a malformed deployment env cannot break startup.
+    """
+    decay_enabled = os.environ.get(DECAY_ENABLED_ENV_VAR, "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+    decay_weight = DEFAULT_DECAY_WEIGHT
+    raw_weight = os.environ.get(DECAY_WEIGHT_ENV_VAR)
+    if raw_weight is not None:
+        try:
+            parsed_weight = float(raw_weight)
+        except ValueError:
+            logging.warning(
+                "Failed to parse %s as a float: %s; using default %s.",
+                DECAY_WEIGHT_ENV_VAR,
+                raw_weight,
+                DEFAULT_DECAY_WEIGHT,
+            )
+        else:
+            if parsed_weight < 0:
+                logging.warning(
+                    "%s must be >= 0; ignoring %s and using default %s.",
+                    DECAY_WEIGHT_ENV_VAR,
+                    raw_weight,
+                    DEFAULT_DECAY_WEIGHT,
+                )
+            else:
+                decay_weight = parsed_weight
+
+    return decay_enabled, decay_weight
 
 
 class RetrievalService:
@@ -42,13 +94,28 @@ class RetrievalService:
         default_result_limit: int = 6,
         reciprocal_rank_k: int = 60,
         reranker: "HeuristicReranker | None" = None,
+        decay_enabled: bool = False,
+        decay_weight: float = DEFAULT_DECAY_WEIGHT,
     ) -> None:
         self._lexical_candidate_limit = lexical_candidate_limit
         self._semantic_candidate_limit = semantic_candidate_limit
         self._rerank_shortlist_limit = rerank_shortlist_limit
         self._default_result_limit = default_result_limit
         self._reciprocal_rank_k = reciprocal_rank_k
-        self._reranker = reranker or HeuristicReranker()
+        self._reranker = reranker or HeuristicReranker(
+            decay_enabled=decay_enabled,
+            decay_weight=decay_weight,
+        )
+
+    @property
+    def _decay_ranking_enabled(self) -> bool:
+        """Whether the active reranker applies a recency-decay ranking term.
+
+        Read from the reranker rather than from a separate field so an
+        injected custom reranker cannot make the advertised ``decay``
+        capability lie about the ranking actually in effect.
+        """
+        return bool(getattr(self._reranker, "decay_enabled", False))
 
     @staticmethod
     def _split_identifier_filters(
@@ -416,6 +483,9 @@ class RetrievalService:
             "semantic": semantic_reason is None,
             "rerank": rerank_applied,
             "anchors": True,
+            # Decay only reaches ranking through the rerank stage, so a
+            # skipped or failed rerank means no decay was applied either.
+            "decay": self._decay_ranking_enabled and rerank_applied,
         }
         degraded = bool(reasons)
         results = self._finalize_candidates(
@@ -1337,6 +1407,33 @@ class RetrievalService:
 
 
 class HeuristicReranker:
+    """Rank ``/retrieve`` candidates by lexical overlap, type, and optional decay."""
+
+    # Fallback half-lives in days, keyed by memory type.  Mirrors
+    # ``deriveHalfLifeDays`` in ``cms/src/lib/decay.ts`` so backend-applied
+    # decay and CMS-displayed decay use the same curve for a given memory.
+    _DEFAULT_HALF_LIFE_DAYS: dict[str, float] = {
+        "decision": 30.0,
+        "stable-fact": 30.0,
+        "procedure": 7.0,
+        "problem-fix": 4.0,
+    }
+    _FALLBACK_HALF_LIFE_DAYS = 4.0
+    # Recency used when a candidate has no parseable ``created_at``: neutral,
+    # so an undated memory is neither promoted nor buried.
+    _NEUTRAL_RECENCY = 0.5
+    _EXPIRED_TTL_PENALTY = 0.25
+    _SECONDS_PER_DAY = 86400.0
+
+    def __init__(
+        self,
+        *,
+        decay_enabled: bool = False,
+        decay_weight: float = DEFAULT_DECAY_WEIGHT,
+    ) -> None:
+        self.decay_enabled = decay_enabled
+        self.decay_weight = decay_weight
+
     def rerank(
         self,
         *,
@@ -1345,6 +1442,7 @@ class HeuristicReranker:
     ) -> list[dict[str, Any]]:
         query_tokens = RetrievalService._tokenize(query)
         scored_candidates: list[tuple[float, int, dict[str, Any]]] = []
+        now_timestamp = datetime.now(timezone.utc).timestamp()
 
         for index, candidate in enumerate(candidates, start=1):
             corpus = self._candidate_corpus(candidate)
@@ -1355,8 +1453,18 @@ class HeuristicReranker:
             )
             type_bonus = self._type_bonus(candidate)
             base_score = float(candidate.get("score", 0.0) or 0.0)
+            decay_bonus = (
+                self._decay_bonus(candidate, now_timestamp=now_timestamp)
+                if self.decay_enabled
+                else 0.0
+            )
             heuristic_score = round(
-                base_score + (overlap * 0.005) + phrase_bonus + type_bonus, 6
+                base_score
+                + (overlap * 0.005)
+                + phrase_bonus
+                + type_bonus
+                + decay_bonus,
+                6,
             )
             reranked_candidate = dict(candidate)
             reranked_candidate["score"] = heuristic_score
@@ -1389,3 +1497,110 @@ class HeuristicReranker:
         if memory_type == "stable-fact":
             return 0.005
         return 0.0
+
+    def _decay_bonus(
+        self,
+        candidate: dict[str, Any],
+        *,
+        now_timestamp: float,
+    ) -> float:
+        """Return the weighted recency term added to a candidate's score.
+
+        Additive rather than multiplicative: the sibling bonuses are small
+        (0.005-0.02) next to ``base_score``, so scaling the total by a recency
+        factor would make age the dominant sort key instead of a tunable
+        signal.  ``decay_weight`` therefore bounds decay's maximum influence.
+        """
+        recency = self._recency_score(candidate, now_timestamp=now_timestamp)
+        return recency * self.decay_weight
+
+    def _recency_score(
+        self,
+        candidate: dict[str, Any],
+        *,
+        now_timestamp: float,
+    ) -> float:
+        """Return the 0..1 recency score for a candidate.
+
+        Implements the ``cms/src/lib/decay.ts`` formula:
+        ``0.5 ** (age_days / half_life_days)``, quartered when
+        ``ttl_expires_at`` is in the past, and neutral when the memory carries
+        no parseable ``created_at``.  Age is measured from ``created_at``
+        specifically -- never ``updated_at`` -- so that editing a memory does
+        not reset its decay curve.
+        """
+        metadata = candidate.get("metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+
+        created_timestamp = self._created_timestamp(candidate, metadata)
+        if created_timestamp is None:
+            return self._NEUTRAL_RECENCY
+
+        half_life_days = self._half_life_days(metadata)
+        age_days = max(0.0, (now_timestamp - created_timestamp) / self._SECONDS_PER_DAY)
+        recency = 0.5 ** (age_days / half_life_days)
+
+        ttl_timestamp = self._parse_timestamp(metadata.get("ttl_expires_at"))
+        if ttl_timestamp is not None and now_timestamp > ttl_timestamp:
+            recency *= self._EXPIRED_TTL_PENALTY
+
+        return recency
+
+    @classmethod
+    def _created_timestamp(
+        cls,
+        candidate: dict[str, Any],
+        metadata: dict[str, Any],
+    ) -> float | None:
+        """Return the ``created_at`` epoch seconds, preferring the top level.
+
+        Top-level-then-metadata lookup matches how
+        ``QueryService._coerce_memory_datetime`` resolves record timestamps.
+        """
+        for source in (candidate, metadata):
+            timestamp = cls._parse_timestamp(source.get("created_at"))
+            if timestamp is not None:
+                return timestamp
+        return None
+
+    @classmethod
+    def _half_life_days(cls, metadata: dict[str, Any]) -> float:
+        """Return the half-life in days for a memory's metadata.
+
+        An explicit positive ``decay_half_life_days`` wins; otherwise the value
+        is derived from the memory type.  Non-numeric and non-positive values
+        are ignored because a zero or negative half-life has no meaningful
+        curve (``AdminFreshnessInfo`` likewise requires it to be > 0).
+        """
+        explicit_half_life = metadata.get("decay_half_life_days")
+        if (
+            isinstance(explicit_half_life, (int, float))
+            and not isinstance(explicit_half_life, bool)
+            and explicit_half_life > 0
+        ):
+            return float(explicit_half_life)
+
+        memory_type = metadata.get("type") or metadata.get("memory_type")
+        if isinstance(memory_type, str):
+            return cls._DEFAULT_HALF_LIFE_DAYS.get(
+                memory_type, cls._FALLBACK_HALF_LIFE_DAYS
+            )
+        return cls._FALLBACK_HALF_LIFE_DAYS
+
+    @staticmethod
+    def _parse_timestamp(value: Any) -> float | None:
+        """Return epoch seconds for an ISO-8601 string, or ``None`` if unusable.
+
+        Malformed timestamps yield ``None`` instead of raising so that one bad
+        record cannot fail the whole rerank stage.  Naive timestamps are read as
+        UTC, matching how the backend writes them.
+        """
+        if not isinstance(value, str) or not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
