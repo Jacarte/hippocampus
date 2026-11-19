@@ -306,6 +306,9 @@ def create_app(
                 memory_instance=memory_instance,
                 user_id=query_req.user_id,
                 min_score_memory=query_req.min_score_memory,
+                # ``project`` only labels observability events; forward it
+                # solely when the caller supplied one.
+                **({"project": query_req.project} if query_req.project else {}),
             ),
         )
 

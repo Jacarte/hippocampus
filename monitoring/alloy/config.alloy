@@ -1,0 +1,73 @@
+// Ships mem0-server JSON query events (stdout) to Loki.
+//
+// Only lines that start with {"event": are kept; plain-text uvicorn/app logs are
+// dropped. Loki labels are limited to low-cardinality fields. query, memory_id,
+// request_id and every other field stay inside the log line.
+
+discovery.docker "containers" {
+	host = "unix:///var/run/docker.sock"
+}
+
+// Keep only the container named exactly mem0-server (docker names carry a leading "/").
+discovery.relabel "mem0_server" {
+	targets = discovery.docker.containers.targets
+
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/mem0-server"
+		action        = "keep"
+	}
+}
+
+loki.source.docker "mem0_server" {
+	host       = "unix:///var/run/docker.sock"
+	targets    = discovery.relabel.mem0_server.output
+	forward_to = [loki.process.events.receiver]
+}
+
+loki.process "events" {
+	forward_to = [loki.write.local.receiver]
+
+	stage.static_labels {
+		values = {
+			service = "mem0-server",
+		}
+	}
+
+	// Drop everything that is not a single-line JSON event.
+	stage.match {
+		selector = "{service=\"mem0-server\"} !~ \"^\\\\{\\\"event\\\":\""
+		action   = "drop"
+	}
+
+	stage.json {
+		expressions = {
+			event    = "event",
+			endpoint = "endpoint",
+			user_id  = "user_id",
+			agent_id = "agent_id",
+			project  = "project",
+		}
+	}
+
+	stage.labels {
+		values = {
+			event    = "",
+			endpoint = "",
+			user_id  = "",
+			agent_id = "",
+			project  = "",
+		}
+	}
+
+	// Guarantee no other label (container, stream, ...) reaches Loki.
+	stage.label_keep {
+		values = ["service", "event", "endpoint", "user_id", "agent_id", "project"]
+	}
+}
+
+loki.write "local" {
+	endpoint {
+		url = "http://loki:3100/loki/api/v1/push"
+	}
+}

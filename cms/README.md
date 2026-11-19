@@ -59,7 +59,7 @@ Visits are explicit. Opening a memory detail in the CMS does not automatically r
 - `edit_save` — operator saved an edit
 - `copy_source` — operator copied the memory
 
-The backend persists `total_visits`, `last_visited_at`, and related aggregates. The CMS reads these raw fields and computes display values (decay scores, recency) client-side using the formulas from `~/.config/opencode/plugins/mem0-functional.ts` (`deriveHalfLifeDays`, `computeRecencyScore`).
+The backend persists `total_visits`, `last_visited_at`, and related aggregates. The CMS reads these raw fields and computes display values (decay scores, recency) client-side using the `deriveHalfLifeDays` and `computeRecencyScore` formulas.
 
 ## How decay works
 

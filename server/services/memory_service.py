@@ -3,12 +3,15 @@ from __future__ import annotations
 from contextlib import contextmanager
 import hashlib
 import json
+import logging
+import time
 from typing import Any
 
 from fastapi import FastAPI
 
 from api_models import MemoryCreate, RetrieveRequest, SearchRequest
 
+from . import query_events
 from .anchor_service import AnchorService
 from .mem0_compat import MemoryWriteError, add_memories
 from .metrics import (
@@ -21,6 +24,9 @@ from .retrieval_service import RetrievalService
 from .runtime import initialize_memory
 from .tracing import current_request_id, trace_backend_operation
 from .write_receipts import WriteReceiptStore
+
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryService:
@@ -364,6 +370,7 @@ class MemoryService:
         uid = payload.user_id or ""
         aid = payload.agent_id or ""
         memory_retrieve_total.labels(user_id=uid, agent_id=aid).inc()
+        started_at = time.perf_counter()
         with self._track_op("search", user_id=uid, agent_id=aid):
             filters = self._anchor_service.prepare_filters(payload.filters)
             trace_backend_operation(
@@ -381,22 +388,28 @@ class MemoryService:
                     if value is not None
                 ),
             )
-            response = self._retrieval_service.search(
-                memory_instance,
-                query=payload.query,
-                user_id=payload.user_id,
-                run_id=payload.run_id,
-                agent_id=payload.agent_id,
-                filters=filters,
-            )
+            try:
+                response = self._retrieval_service.search(
+                    memory_instance,
+                    query=payload.query,
+                    user_id=payload.user_id,
+                    run_id=payload.run_id,
+                    agent_id=payload.agent_id,
+                    filters=filters,
+                )
+            except Exception as exc:
+                self._emit_failed_query_event("search", payload, exc, started_at)
+                raise
             normalized = self._anchor_service.normalize_payload(response)
         self._count_hits(normalized, user_id=uid, agent_id=aid)
+        self._emit_query_events("search", payload, normalized, started_at)
         return normalized
 
     def retrieve(self, memory_instance: Any, payload: RetrieveRequest) -> Any:
         uid = payload.user_id or ""
         aid = payload.agent_id or ""
         memory_retrieve_total.labels(user_id=uid, agent_id=aid).inc()
+        started_at = time.perf_counter()
         with self._track_op("retrieve", user_id=uid, agent_id=aid):
             identifiers = self._identifier_params(
                 user_id=payload.user_id,
@@ -413,19 +426,95 @@ class MemoryService:
                 limit=payload.limit,
                 identifiers=sorted(identifiers.keys()),
             )
-            response = self._retrieval_service.retrieve(
-                memory_instance,
-                query=payload.query,
-                scopes=payload.scopes,
-                user_id=payload.user_id,
-                run_id=payload.run_id,
-                agent_id=payload.agent_id,
-                limit=payload.limit,
-                filters=filters,
-            )
+            try:
+                response = self._retrieval_service.retrieve(
+                    memory_instance,
+                    query=payload.query,
+                    scopes=payload.scopes,
+                    user_id=payload.user_id,
+                    run_id=payload.run_id,
+                    agent_id=payload.agent_id,
+                    limit=payload.limit,
+                    filters=filters,
+                )
+            except Exception as exc:
+                self._emit_failed_query_event("retrieve", payload, exc, started_at)
+                raise
             normalized = self._anchor_service.normalize_payload(response)
         self._count_hits(normalized, user_id=uid, agent_id=aid)
+        self._emit_query_events("retrieve", payload, normalized, started_at)
         return normalized
+
+    def _emit_query_events(
+        self,
+        endpoint: str,
+        payload: SearchRequest | RetrieveRequest,
+        response: Any,
+        started_at: float,
+    ) -> None:
+        """Emit stdout query/hit events; never raises or alters the response."""
+        try:
+            project = query_events.derive_project(payload.user_id, payload.project)
+            hits = query_events.extract_memory_hits(response)
+            summary = query_events.summarize_retrieval(response)
+            query_events.emit_query_event(
+                endpoint=endpoint,
+                query=payload.query,
+                filters=payload.filters,
+                scopes=getattr(payload, "scopes", None),
+                limit=getattr(payload, "limit", None),
+                user_id=payload.user_id,
+                agent_id=payload.agent_id,
+                run_id=payload.run_id,
+                project=project,
+                hits=len(hits),
+                lexical=summary["lexical"],
+                semantic=summary["semantic"],
+                rerank=summary["rerank"],
+                degraded=summary["degraded"],
+                degradation_reasons=summary["degradation_reasons"],
+                latency_ms=(time.perf_counter() - started_at) * 1000,
+            )
+            query_events.emit_memory_hits(
+                endpoint=endpoint,
+                hits=hits,
+                user_id=payload.user_id,
+                agent_id=payload.agent_id,
+                project=project,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("query event emission failed", exc_info=True)
+
+    @staticmethod
+    def _emit_failed_query_event(
+        endpoint: str,
+        payload: SearchRequest | RetrieveRequest,
+        exc: Exception,
+        started_at: float,
+    ) -> None:
+        """Emit a degraded zero-hit event for a hard backend failure.
+
+        Best effort: never raises, so the caller always re-raises the original
+        exception unchanged.
+        """
+        try:
+            query_events.emit_query_event(
+                endpoint=endpoint,
+                query=payload.query,
+                filters=payload.filters,
+                scopes=getattr(payload, "scopes", None),
+                limit=getattr(payload, "limit", None),
+                user_id=payload.user_id,
+                agent_id=payload.agent_id,
+                run_id=payload.run_id,
+                project=query_events.derive_project(payload.user_id, payload.project),
+                hits=0,
+                degraded=True,
+                degradation_reasons=[type(exc).__name__],
+                latency_ms=(time.perf_counter() - started_at) * 1000,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("query event emission failed", exc_info=True)
 
     def update(
         self, memory_instance: Any, memory_id: str, updated_memory: dict[str, Any]

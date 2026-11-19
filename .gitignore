@@ -12,4 +12,3 @@ node_modules/
 dist/
 
 .playwright-mcp/
-.opencode/runtime/

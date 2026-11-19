@@ -1,0 +1,852 @@
+{
+  "title": "Mem0 — Query Misses",
+  "uid": "mem0-query-misses",
+  "version": 1,
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "editable": true,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "tags": [
+    "mem0",
+    "queries",
+    "misses",
+    "loki"
+  ],
+  "links": [
+    {
+      "type": "dashboards",
+      "title": "Mem0 dashboards",
+      "tags": [
+        "mem0"
+      ],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true,
+      "icon": "external link",
+      "targetBlank": false,
+      "tooltip": "",
+      "url": ""
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "project",
+        "label": "project",
+        "description": "Project hash (suffix of user_id)",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "query": {
+          "label": "project",
+          "refId": "LokiVariableQueryEditor-VariableQuery",
+          "stream": "{service=\"mem0-server\"}",
+          "type": 1
+        },
+        "definition": "project",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "regex": "",
+        "hide": 0
+      },
+      {
+        "name": "agent_id",
+        "label": "agent_id",
+        "description": "Agent that issued the query",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "query": {
+          "label": "agent_id",
+          "refId": "LokiVariableQueryEditor-VariableQuery",
+          "stream": "{service=\"mem0-server\"}",
+          "type": 1
+        },
+        "definition": "agent_id",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "regex": "",
+        "hide": 0
+      },
+      {
+        "name": "user_id",
+        "label": "user_id",
+        "description": "Scoped user id",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "query": {
+          "label": "user_id",
+          "refId": "LokiVariableQueryEditor-VariableQuery",
+          "stream": "{service=\"mem0-server\"}",
+          "type": 1
+        },
+        "definition": "user_id",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "regex": "",
+        "hide": 0
+      },
+      {
+        "name": "endpoint",
+        "label": "endpoint",
+        "description": "search | retrieve | query",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "query": {
+          "label": "endpoint",
+          "refId": "LokiVariableQueryEditor-VariableQuery",
+          "stream": "{service=\"mem0-server\"}",
+          "type": 1
+        },
+        "definition": "endpoint",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "regex": "",
+        "hide": 0
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "How to read this dashboard",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "text",
+      "title": "How to read this dashboard",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**What this dashboard answers:** which queries to Mem0 found nothing (or found less than expected), and why.\n\n* Every `/search`, `/retrieve` and `/query` call writes one `query_event` JSON line to the `mem0-server` stdout; Alloy ships it to Loki. Use the **project / agent_id / user_id / endpoint** variables (multi-select, default *All*) to narrow down.\n* **True miss** = `hits=0` and the request was *not* degraded: the stores answered and truly had nothing. Action: the memory is missing, was stored under another scope/user/agent, or the query wording does not match. Check the *filters* and *scopes* of the event, then look in the CMS. For `/query` events, `candidates>0` means results existed but the score threshold (`min_score_memory`) filtered them out.\n* **Partial miss** = `lexical=0`, `hits>0` and not degraded: only semantic search found something. Action: keyword/BM25 coverage gap (rare terms, identifiers, language mismatch).\n* **Zero-hit while degraded** = `hits=0` and a retrieval stage was unavailable (see `degradation_reasons`). Hard backend failures on `/search` and `/retrieve` also appear here, with the exception type as reason. Do **not** treat it as missing knowledge: fix the failing stage first (embedder, reranker, vector store) and re-run the query.\n* A blank `lexical`/`semantic`/`rerank` cell means that stage did not run or did not report a count.\n* The time range picker applies to every panel. Columns are sortable and filterable; click a cell to filter.\n\n**Privacy:** the `query` and `filters` columns contain raw query text. Anyone with Grafana access can read them (Grafana runs with anonymous Admin). Retention is 14 days."
+      },
+      "transparent": false
+    },
+    {
+      "id": 3,
+      "type": "row",
+      "title": "Summary",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
+      "panels": []
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Zero-hit rate",
+      "description": "Share of query events in the selected time range that returned 0 hits (true misses + zero-hit while degraded) divided by all query events. Read it as: 'how often does an agent come back empty-handed'. Green < 10%, yellow 10-30%, red > 30% (rough guidelines, tune to your traffic). A rising value with a flat true-miss count points to degradation; see the 'Zero-hit while degraded' panel.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 12
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "0",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 0.3
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "(sum(count_over_time({service=\"mem0-server\",event=\"query_event\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} | json hits=\"hits\" | hits=0 | __error__=\"\" [$__range])) or vector(0)) / sum(count_over_time({service=\"mem0-server\",event=\"query_event\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} [$__range]))",
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Query events",
+      "description": "Number of query events (search + retrieve + query) in the selected time range and filters. Use it to judge whether the zero-hit rate is statistically meaningful: a few events make the rate swing wildly.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 12
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({service=\"mem0-server\",event=\"query_event\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} [$__range])) or vector(0)",
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "True misses",
+      "description": "Count of query events with hits=0 that were NOT degraded: the stores answered and had nothing. These are the ones worth investigating (see the table below). Excludes zero-hit queries caused by a degraded retrieval stage. For /query events, `candidates` (see the table below) greater than 0 means results existed but were removed by the score threshold (min_score_memory).",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 12
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({service=\"mem0-server\",event=\"query_event\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} | json hits=\"hits\", degraded=\"degraded\" | hits=0 and degraded=\"false\" | __error__=\"\" [$__range])) or vector(0)",
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Zero-hit queries by endpoint",
+      "description": "Zero-hit query events per bucket, split by endpoint (search / retrieve / query). Includes degraded zero-hit events. A spike on one endpoint usually means a client or scope problem on that path; a spike on all endpoints at once usually means a backend stage failure (cross-check the degraded panel).",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "drawStyle": "bars",
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "0",
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (endpoint) (count_over_time({service=\"mem0-server\",event=\"query_event\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} | json hits=\"hits\" | hits=0 | __error__=\"\" [$__interval]))",
+          "queryType": "range",
+          "editorMode": "code",
+          "legendFormat": "{{endpoint}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Misses in detail",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "panels": []
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "True misses (hits=0, not degraded)",
+      "description": "Each row is one query that found nothing although every retrieval stage worked. Read: 'query' = what was asked, 'filters' = metadata filters applied (a wrong filter is the most common cause), project/agent_id/user_id = scope. lexical/semantic/rerank = candidates found per stage (0 everywhere = nothing relevant stored; empty = stage did not run). Action: search the CMS for the expected memory under the same user/agent; if it exists, compare scopes/filters; if not, it was never stored. candidates (only /query events) = results before the score threshold: candidates > 0 means something was found but filtered out by min_score_memory, so lower the threshold or reword; candidates = 0 (or empty on search/retrieve) means nothing matched at all.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true,
+            "inspect": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "query"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 380
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "filters"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Time",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=\"mem0-server\",event=\"query_event\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} | json hits=\"hits\", degraded=\"degraded\" | hits=0 and degraded=\"false\" | __error__=\"\"",
+          "queryType": "range",
+          "editorMode": "code",
+          "maxLines": 1000
+        }
+      ],
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "Line",
+            "format": "json",
+            "replace": false,
+            "keepTime": false
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "labels": true,
+              "Line": true,
+              "tsNs": true,
+              "id": true,
+              "event": true,
+              "ts": true,
+              "request_id": true,
+              "query_truncated": true,
+              "run_id": true,
+              "scopes": true,
+              "limit": true,
+              "labelTypes": true
+            },
+            "indexByName": {
+              "Time": 0,
+              "endpoint": 1,
+              "project": 2,
+              "agent_id": 3,
+              "user_id": 4,
+              "query": 5,
+              "filters": 6,
+              "lexical": 7,
+              "semantic": 8,
+              "rerank": 9,
+              "hits": 11,
+              "latency_ms": 12,
+              "candidates": 10
+            },
+            "renameByName": {}
+          }
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Partial misses (lexical=0, hits>0)",
+      "description": "Queries that returned results although the lexical (keyword/BM25) stage found 0 candidates, so only the semantic stage delivered. Read: if this is frequent for a project/agent, keyword matching is not helping (identifiers, rare terms, other language). Action: check how memories are phrased versus how agents query; consider adding the literal terms to the memory text. Degraded events are excluded (an outage can also show lexical=0).",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true,
+            "inspect": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "query"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 380
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "filters"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Time",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=\"mem0-server\",event=\"query_event\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} | json hits=\"hits\", lexical=\"lexical\", degraded=\"degraded\" | lexical=0 and hits>0 and degraded=\"false\" | __error__=\"\"",
+          "queryType": "range",
+          "editorMode": "code",
+          "maxLines": 1000
+        }
+      ],
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "Line",
+            "format": "json",
+            "replace": false,
+            "keepTime": false
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "labels": true,
+              "Line": true,
+              "tsNs": true,
+              "id": true,
+              "event": true,
+              "ts": true,
+              "request_id": true,
+              "query_truncated": true,
+              "run_id": true,
+              "scopes": true,
+              "limit": true,
+              "labelTypes": true
+            },
+            "indexByName": {
+              "Time": 0,
+              "endpoint": 1,
+              "project": 2,
+              "agent_id": 3,
+              "user_id": 4,
+              "query": 5,
+              "filters": 6,
+              "lexical": 7,
+              "semantic": 8,
+              "rerank": 9,
+              "hits": 10
+            },
+            "renameByName": {}
+          }
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "table",
+      "title": "Zero-hit while degraded (hits=0, degraded=true)",
+      "description": "Queries that returned nothing while a retrieval stage was unavailable (see degradation_reasons, e.g. semantic_unavailable, rerank_unavailable). These are NOT proof the memory is missing. Read: group by reason; action: fix the failing component (embedder/Ollama, reranker, vector store), then re-run the query. Compare with the Retrieval Pipeline dashboard for the same time window.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 45
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true,
+            "inspect": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "query"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 380
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "filters"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 220
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Time",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=\"mem0-server\",event=\"query_event\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} | json hits=\"hits\", degraded=\"degraded\" | hits=0 and degraded=\"true\" | __error__=\"\"",
+          "queryType": "range",
+          "editorMode": "code",
+          "maxLines": 1000
+        }
+      ],
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "source": "Line",
+            "format": "json",
+            "replace": false,
+            "keepTime": false
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "labels": true,
+              "Line": true,
+              "tsNs": true,
+              "id": true,
+              "event": true,
+              "ts": true,
+              "request_id": true,
+              "query_truncated": true,
+              "run_id": true,
+              "scopes": true,
+              "limit": true,
+              "labelTypes": true
+            },
+            "indexByName": {
+              "Time": 0,
+              "endpoint": 1,
+              "project": 2,
+              "agent_id": 3,
+              "user_id": 4,
+              "query": 5,
+              "filters": 6,
+              "degradation_reasons": 7,
+              "lexical": 8,
+              "semantic": 9,
+              "rerank": 10,
+              "hits": 11
+            },
+            "renameByName": {}
+          }
+        }
+      ]
+    }
+  ]
+}

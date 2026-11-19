@@ -1,0 +1,672 @@
+{
+  "title": "Mem0 — Hot Memories",
+  "uid": "mem0-hot-memories",
+  "version": 1,
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "editable": true,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "tags": [
+    "mem0",
+    "memories",
+    "hits",
+    "loki",
+    "postgres"
+  ],
+  "links": [
+    {
+      "type": "dashboards",
+      "title": "Mem0 dashboards",
+      "tags": [
+        "mem0"
+      ],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true,
+      "icon": "external link",
+      "targetBlank": false,
+      "tooltip": "",
+      "url": ""
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "project",
+        "label": "project",
+        "description": "Project hash (suffix of user_id)",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "query": {
+          "label": "project",
+          "refId": "LokiVariableQueryEditor-VariableQuery",
+          "stream": "{service=\"mem0-server\"}",
+          "type": 1
+        },
+        "definition": "project",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "regex": "",
+        "hide": 0
+      },
+      {
+        "name": "agent_id",
+        "label": "agent_id",
+        "description": "Agent that issued the query",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "query": {
+          "label": "agent_id",
+          "refId": "LokiVariableQueryEditor-VariableQuery",
+          "stream": "{service=\"mem0-server\"}",
+          "type": 1
+        },
+        "definition": "agent_id",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "regex": "",
+        "hide": 0
+      },
+      {
+        "name": "user_id",
+        "label": "user_id",
+        "description": "Scoped user id",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "query": {
+          "label": "user_id",
+          "refId": "LokiVariableQueryEditor-VariableQuery",
+          "stream": "{service=\"mem0-server\"}",
+          "type": 1
+        },
+        "definition": "user_id",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "regex": "",
+        "hide": 0
+      },
+      {
+        "name": "endpoint",
+        "label": "endpoint",
+        "description": "search | retrieve | query",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "query": {
+          "label": "endpoint",
+          "refId": "LokiVariableQueryEditor-VariableQuery",
+          "stream": "{service=\"mem0-server\"}",
+          "type": 1
+        },
+        "definition": "endpoint",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "regex": "",
+        "hide": 0
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "How to read this dashboard",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "text",
+      "title": "How to read this dashboard",
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**What this dashboard answers:** which memories are returned most often, when, and at which rank.\n\n* Every returned memory writes one `memory_hit` JSON line (id, rank, score, scope) to the `mem0-server` stdout; Alloy ships it to Loki. At most 50 hits per request are logged. Use the **project / agent_id / user_id / endpoint** variables to narrow down.\n* **Memory text is never logged.** The `memory` column of *Top memories by hits* is looked up live in Postgres (datasource *Mem0 Postgres (read-only)*, role `grafana_ro`, first 100 chars of `payload.data`) and joined on `memory_id` when the panel loads. It shows the **current** text, not the text at hit time. Empty `memory` = the memory was deleted (or is not among the first 20000 rows read). If the Postgres query fails (role missing, Postgres down), the table still lists `memory_id` and hits but has no `memory` column and shows an error icon; the `grafana-pg-init` compose service creates the role (fallback: `./monitoring/postgres/create-grafana-ro.sh`). The heatmap rows stay `memory_id`.\n* *Hot* memories (high hit counts) are the knowledge agents rely on: keep them accurate and up to date. A memory that is hot at rank 1 but outdated is the most harmful kind. Edit it in the CMS (default http://localhost:8080).\n* Memories that are **never** hot are candidates for cleanup or rewording (they exist but are never retrieved). This dashboard only shows hits, so cross-check the CMS list for IDs absent here.\n* The time range picker applies to every panel. Hits counted per `memory_hit` line, not per distinct request.\n\n**Privacy:** the Loki stream holds raw query text for query events (see the Query Misses dashboard) and this dashboard shows memory text from Postgres. Grafana runs with anonymous Admin access: anyone who can reach it can read both (and query Postgres in Explore with the read-only role). Keep it local. Loki retention is 14 days."
+      },
+      "transparent": false
+    },
+    {
+      "id": 3,
+      "type": "row",
+      "title": "Summary",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "panels": []
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Memory hits",
+      "description": "Total memory_hit events (one per returned memory) in the selected time range and filters. Compare with 'Query events' on the Query Misses dashboard to see the average number of memories returned per query.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({service=\"mem0-server\",event=\"memory_hit\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} [$__range])) or vector(0)",
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Distinct memories hit",
+      "description": "Number of different memory IDs that were returned at least once in the selected time range. Low value relative to the memory count (see CMS) = most stored memories are never retrieved.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          },
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "count(sum by (memory_id) (count_over_time({service=\"mem0-server\",event=\"memory_hit\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} | json memory_id=\"memory_id\" [$__range]))) or vector(0)",
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "heatmap",
+      "title": "Hot memories over time (top 20)",
+      "description": "Each row is a memory_id, each column a time bucket; colour = number of times it was returned in that bucket. Read: a row that stays dark is a persistently hot memory; a single dark cell is a burst (e.g. one agent run looping). Why a heatmap fed by a Loki metric query: topk(20, sum by (memory_id) (count_over_time(...))) returns one time series per memory_id, and the Heatmap panel renders pre-bucketed series as rows (calculate=false) with the memory_id as the row label, which stays readable for 20 rows where a line chart would be spaghetti. topk is evaluated per time bucket, so the set of rows can exceed 20 over a long range (an id can enter the top 20 in one bucket only). Rows show memory_id only: Grafana 11.3 has no per-series lookup that could rename heatmap rows from a Postgres query, so the memory text is in the 'Top memories by hits' table below (same memory_id). Action: verify hot memories are correct and current.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": false,
+        "cellGap": 1,
+        "color": {
+          "mode": "scheme",
+          "scheme": "Oranges",
+          "fill": "dark-orange",
+          "scale": "exponential",
+          "exponent": 0.5,
+          "min": 0,
+          "steps": 64,
+          "reverse": false
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "yAxis": {
+          "axisPlacement": "left",
+          "reverse": false
+        },
+        "legend": {
+          "show": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "yHistogram": false,
+          "showColorScale": false
+        },
+        "showValue": "never",
+        "filterValues": {
+          "le": 1e-09
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        },
+        "cellValues": {}
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "topk(20, sum by (memory_id) (count_over_time({service=\"mem0-server\",event=\"memory_hit\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} | json memory_id=\"memory_id\" [$__interval])))",
+          "queryType": "range",
+          "editorMode": "code",
+          "legendFormat": "{{memory_id}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "row",
+      "title": "Rankings",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "panels": []
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Top memories by hits",
+      "description": "Top 20 memory IDs by number of times returned over the whole selected time range (instant Loki query over $__range), with the current memory text (first 100 chars) read live from Postgres. Read: 'Hits' = how many times the memory was returned; 'memory' = what it says now. Action: review the top entries for accuracy and staleness; open the memory_id in the CMS to edit it. How: query A (Loki) counts hits per memory_id, query B (Postgres, read-only role grafana_ro) lists id + text; the Merge transformation combines rows with the same memory_id (memory_id is the only field both queries share, so this is an outer join), then 'Filter data by values' drops rows without hits. Empty memory = deleted from Postgres, or beyond the 20000-row cap of query B. No memory column + error icon = query B failed (role grafana_ro missing or Postgres down).",
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "gridPos": {
+        "h": 22,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true,
+            "inspect": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "memory_id"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 310
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Hits"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "sortBy": [
+          {
+            "displayName": "Hits",
+            "desc": true
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "topk(20, sum by (memory_id) (count_over_time({service=\"mem0-server\",event=\"memory_hit\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} | json memory_id=\"memory_id\" [$__range])))",
+          "queryType": "instant",
+          "editorMode": "code",
+          "legendFormat": "{{memory_id}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mem0-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "SELECT id::text AS memory_id, left(regexp_replace(payload->>'data', '\\s+', ' ', 'g'), 100) AS memory FROM public.mem0_memories LIMIT 20000"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          },
+          "filter": {
+            "id": "byRefId",
+            "options": "A"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "filterByValue",
+          "options": {
+            "type": "include",
+            "match": "any",
+            "filters": [
+              {
+                "fieldName": "Value #A",
+                "config": {
+                  "id": "isNotNull",
+                  "options": {}
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "memory_id": 0,
+              "memory": 1,
+              "Value #A": 2
+            },
+            "renameByName": {
+              "Value #A": "Hits"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "Hits",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Memory hits by rank",
+      "description": "Number of memory hits per time bucket, grouped by the rank at which the memory was returned (rank 1 = best match). Read: a healthy system returns most of its hits at ranks 1-3. If hits pile up at rank 11+ the ranking/rerank stage is not surfacing useful memories early, or queries are very broad. Action: compare with the Retrieval Pipeline dashboard (rerank stage) and the Query Misses dashboard.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 52
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "drawStyle": "bars",
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "noValue": "0",
+          "decimals": 0,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({service=\"mem0-server\",event=\"memory_hit\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} | json rank=\"rank\" | rank=1 | __error__=\"\" [$__interval]))",
+          "queryType": "range",
+          "editorMode": "code",
+          "legendFormat": "rank 1"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({service=\"mem0-server\",event=\"memory_hit\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} | json rank=\"rank\" | rank>=2 and rank<=3 | __error__=\"\" [$__interval]))",
+          "queryType": "range",
+          "editorMode": "code",
+          "legendFormat": "rank 2-3"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({service=\"mem0-server\",event=\"memory_hit\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} | json rank=\"rank\" | rank>=4 and rank<=10 | __error__=\"\" [$__interval]))",
+          "queryType": "range",
+          "editorMode": "code",
+          "legendFormat": "rank 4-10"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({service=\"mem0-server\",event=\"memory_hit\",endpoint=~\"$endpoint\",project=~\"$project\",agent_id=~\"$agent_id\",user_id=~\"$user_id\"} | json rank=\"rank\" | rank>=11 | __error__=\"\" [$__interval]))",
+          "queryType": "range",
+          "editorMode": "code",
+          "legendFormat": "rank 11+"
+        }
+      ]
+    }
+  ]
+}

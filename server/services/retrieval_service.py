@@ -495,6 +495,7 @@ class RetrievalService:
         diagnostics = {
             "lexical_count": len(lexical_results),
             "semantic_count": len(semantic_results),
+            "rerank_count": len(fused_candidates) if rerank_applied else 0,
             "result_count": len(results),
             "rerank_applied": rerank_applied,
             "backend_capabilities": backend_capabilities,

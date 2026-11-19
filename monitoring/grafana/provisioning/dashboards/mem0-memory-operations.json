@@ -9,7 +9,27 @@
     "to": "now"
   },
   "timepicker": {},
-  "tags": ["mem0", "telemetry", "memory-operations"],
+  "links": [
+    {
+      "type": "dashboards",
+      "title": "Mem0 dashboards",
+      "tags": [
+        "mem0"
+      ],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true,
+      "icon": "external link",
+      "targetBlank": false,
+      "tooltip": "",
+      "url": ""
+    }
+  ],
+  "tags": [
+    "mem0",
+    "telemetry",
+    "memory-operations"
+  ],
   "templating": {
     "list": [
       {
@@ -25,8 +45,41 @@
   },
   "panels": [
     {
+      "id": 11,
+      "type": "row",
+      "title": "How to read this dashboard",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 12,
+      "type": "text",
+      "title": "How to read this dashboard",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**What this dashboard answers:** what is being done to memories, by whom, and how often it fails.\n\n* Source: Prometheus counters `memory_operations_total`, `memory_operation_errors_total`, `memory_retrieve_total` and `memory_retrieve_hits_total`. Aggregates only: no query text or memory IDs.\n* **CRUD Operations Rate / Cumulative:** volume per operation. Use the cumulative view to see totals since the server started; the rate view to spot bursts.\n* **Operation Error Rate / Error Rate (fraction):** failures per operation, and failures divided by calls. Any sustained fraction above ~0.01 deserves a look at the server logs for that operation.\n* **Memory Retrieve Hit Rate / Volume:** hit rate = search/retrieve calls with at least one result divided by all calls. It counts calls, not result quality. A falling hit rate means more empty answers. Next: **Mem0 — Query Misses** lists the queries behind it.\n* **Top Memory Operations by User:** the 10 busiest `operation` + `user_id` pairs. In pi, `user_id` is `<user>:project:<hash>`, so this is effectively the busiest projects.\n* To see which memories are hit most, open **Mem0 — Hot Memories**."
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
       "id": 1,
       "panels": [],
       "title": "Operation Volumes",
@@ -36,22 +89,37 @@
       "id": 2,
       "title": "CRUD Operations Rate",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
-          "custom": { "lineInterpolation": "smooth" }
+          "custom": {
+            "lineInterpolation": "smooth"
+          }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "calcs": ["mean", "max"],
+          "calcs": [
+            "mean",
+            "max"
+          ],
           "displayMode": "table",
           "placement": "bottom"
         },
-        "tooltip": { "mode": "multi" }
+        "tooltip": {
+          "mode": "multi"
+        }
       },
       "targets": [
         {
@@ -59,28 +127,43 @@
           "legendFormat": "{{operation}}",
           "refId": "A"
         }
-      ]
+      ],
+      "description": "Operations per second by operation, user_id and agent_id. Use it to spot bursts."
     },
     {
       "id": 3,
       "title": "CRUD Operations — Cumulative",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "custom": { "lineInterpolation": "stepAfter" }
+          "custom": {
+            "lineInterpolation": "stepAfter"
+          }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "calcs": ["last"],
+          "calcs": [
+            "last"
+          ],
           "displayMode": "table",
           "placement": "bottom"
         },
-        "tooltip": { "mode": "multi" }
+        "tooltip": {
+          "mode": "multi"
+        }
       },
       "targets": [
         {
@@ -88,11 +171,17 @@
           "legendFormat": "{{operation}}",
           "refId": "A"
         }
-      ]
+      ],
+      "description": "Total operations since the server started, per operation."
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
       "id": 4,
       "panels": [],
       "title": "Errors & Hit Rate",
@@ -102,23 +191,40 @@
       "id": 5,
       "title": "Operation Error Rate",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "cps",
-          "custom": { "lineInterpolation": "smooth" },
-          "color": { "mode": "palette-classic" }
+          "custom": {
+            "lineInterpolation": "smooth"
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "calcs": ["mean", "max"],
+          "calcs": [
+            "mean",
+            "max"
+          ],
           "displayMode": "table",
           "placement": "bottom"
         },
-        "tooltip": { "mode": "multi" }
+        "tooltip": {
+          "mode": "multi"
+        }
       },
       "targets": [
         {
@@ -126,31 +232,49 @@
           "legendFormat": "{{operation}}",
           "refId": "A"
         }
-      ]
+      ],
+      "description": "Failed operations per second by operation."
     },
     {
       "id": 6,
       "title": "Error Rate (fraction of operations)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
           "min": 0,
           "max": 1,
-          "custom": { "lineInterpolation": "smooth" },
-          "color": { "mode": "palette-classic" }
+          "custom": {
+            "lineInterpolation": "smooth"
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "calcs": ["mean", "max"],
+          "calcs": [
+            "mean",
+            "max"
+          ],
           "displayMode": "table",
           "placement": "bottom"
         },
-        "tooltip": { "mode": "multi" }
+        "tooltip": {
+          "mode": "multi"
+        }
       },
       "targets": [
         {
@@ -158,30 +282,46 @@
           "legendFormat": "error fraction",
           "refId": "A"
         }
-      ]
+      ],
+      "description": "Failures divided by calls. Sustained values above ~0.01 deserve a look at the server logs for that operation."
     },
     {
       "id": 7,
       "title": "Memory Retrieve Hit Rate",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "percentunit",
           "min": 0,
           "max": 1,
-          "custom": { "lineInterpolation": "smooth" }
+          "custom": {
+            "lineInterpolation": "smooth"
+          }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "calcs": ["mean", "last"],
+          "calcs": [
+            "mean",
+            "last"
+          ],
           "displayMode": "table",
           "placement": "bottom"
         },
-        "tooltip": { "mode": "multi" }
+        "tooltip": {
+          "mode": "multi"
+        }
       },
       "targets": [
         {
@@ -189,28 +329,44 @@
           "legendFormat": "hit rate",
           "refId": "A"
         }
-      ]
+      ],
+      "description": "Search/retrieve calls with at least one result divided by all such calls. Counts calls, not result quality."
     },
     {
       "id": 8,
       "title": "Retrieve Volume (hits vs total)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "cps",
-          "custom": { "lineInterpolation": "smooth" }
+          "custom": {
+            "lineInterpolation": "smooth"
+          }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "calcs": ["mean", "last"],
+          "calcs": [
+            "mean",
+            "last"
+          ],
           "displayMode": "table",
           "placement": "bottom"
         },
-        "tooltip": { "mode": "multi" }
+        "tooltip": {
+          "mode": "multi"
+        }
       },
       "targets": [
         {
@@ -223,11 +379,17 @@
           "legendFormat": "hits",
           "refId": "B"
         }
-      ]
+      ],
+      "description": "Search/retrieve calls per second: all calls versus calls that returned results. The gap is the number of empty answers."
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
       "id": 9,
       "panels": [],
       "title": "Top Operations by User",
@@ -237,11 +399,21 @@
       "id": 10,
       "title": "Top Memory Operations by User",
       "type": "table",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 27 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
         "defaults": {
-          "custom": { "align": "auto" },
+          "custom": {
+            "align": "auto"
+          },
           "displayMode": "auto"
         },
         "overrides": []
@@ -277,7 +449,8 @@
             "renameByName": {}
           }
         }
-      ]
+      ],
+      "description": "The 10 busiest operation + user_id pairs. In pi, user_id ends with the project hash, so this is the busiest projects."
     }
   ]
 }

@@ -97,6 +97,10 @@ services:
       MEM0_WORKERS: ${MEM0_WORKERS:-4}
       MEM0_LOG_LEVEL: ${MEM0_LOG_LEVEL:-info}
       MEM0_HISTORY_DB_PATH: /var/lib/mem0/history.db
+
+      # Recency-decay ranking (affects /retrieve reranking only, not /search)
+      MEM0_RETRIEVAL_DECAY_ENABLED: ${MEM0_RETRIEVAL_DECAY_ENABLED:-true}
+      MEM0_RETRIEVAL_DECAY_WEIGHT: ${MEM0_RETRIEVAL_DECAY_WEIGHT:-0.05}
     depends_on:
       postgres:
         condition: service_healthy
@@ -146,6 +150,10 @@ services:
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      # Read-only Postgres datasource mem0-pg (role created by the grafana-pg-init service below).
+      # No depends_on postgres: a Postgres problem only empties the memory text column.
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      GRAFANA_PG_PASSWORD: ${GRAFANA_PG_PASSWORD:-grafana_ro}
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
     networks:
@@ -155,6 +163,80 @@ services:
       - prometheus
     labels:
       com.example.description: "Grafana dashboards for mem0-server telemetry"
+
+  # One-shot: creates/updates the read-only role grafana_ro used by Grafana's
+  # Postgres datasource (mem0-pg). Idempotent, re-runs on every `docker compose up`.
+  # Grafana does not depend on it: if it fails, only the memory text column is empty.
+  grafana-pg-init:
+    image: pgvector/pgvector:pg16
+    container_name: mem0-grafana-pg-init
+    entrypoint: ["sh", "/grafana-pg-init/grafana-pg-init.sh"]
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-postgres}
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      GRAFANA_PG_PASSWORD: ${GRAFANA_PG_PASSWORD:-grafana_ro}
+      GRAFANA_PG_INIT_TIMEOUT_SECONDS: 300
+    volumes:
+      - ./monitoring/postgres/grafana-pg-init.sh:/grafana-pg-init/grafana-pg-init.sh:ro
+      - ./monitoring/postgres/create-grafana-ro.sql:/grafana-pg-init/create-grafana-ro.sql:ro
+    networks:
+      - mem0-network
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mem0-server:
+        condition: service_healthy
+    labels:
+      com.example.description: "One-shot: creates the read-only Postgres role grafana_ro for Grafana"
+    security_opt:
+      - no-new-privileges:true
+
+  loki:
+    image: grafana/loki:3.3.2
+    container_name: mem0-loki
+    command: ["-config.file=/etc/loki/loki-config.yaml"]
+    volumes:
+      - ./monitoring/loki/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki_data:/loki
+    networks:
+      - mem0-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:3100/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    labels:
+      com.example.description: "Loki log store for mem0 query events (14d retention)"
+    security_opt:
+      - no-new-privileges:true
+
+  alloy:
+    image: grafana/alloy:v1.5.1
+    container_name: mem0-alloy
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - mem0-network
+    restart: unless-stopped
+    depends_on:
+      loki:
+        condition: service_healthy
+    labels:
+      com.example.description: "Grafana Alloy shipping mem0-server JSON query events to Loki"
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   postgres_data:
@@ -169,6 +251,12 @@ volumes:
       type: none
       o: bind
       device: ${DATA_PATH:-./data}/mem0
+  loki_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_PATH:-./data}/loki
 
 networks:
   mem0-network:

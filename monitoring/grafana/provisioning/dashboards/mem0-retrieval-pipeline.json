@@ -9,7 +9,27 @@
     "to": "now"
   },
   "timepicker": {},
-  "tags": ["mem0", "telemetry", "retrieval-pipeline"],
+  "links": [
+    {
+      "type": "dashboards",
+      "title": "Mem0 dashboards",
+      "tags": [
+        "mem0"
+      ],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true,
+      "icon": "external link",
+      "targetBlank": false,
+      "tooltip": "",
+      "url": ""
+    }
+  ],
+  "tags": [
+    "mem0",
+    "telemetry",
+    "retrieval-pipeline"
+  ],
   "templating": {
     "list": [
       {
@@ -25,8 +45,41 @@
   },
   "panels": [
     {
+      "id": 10,
+      "type": "row",
+      "title": "How to read this dashboard",
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "text",
+      "title": "How to read this dashboard",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**What this dashboard answers:** where does retrieval spend time, and which stage is degrading?\n\n* Source: Prometheus histograms `retrieval_duration_seconds`, `retrieval_candidates_count`, `query_duration_seconds` and `query_hits_count`, plus the counter `retrieval_degradations_total`. Aggregates only.\n* **Stage Duration (avg / p99):** one line per stage: `lexical` (term match), `semantic` (embeddings), `rerank`, `total`. The stage whose p99 grows is the bottleneck.\n* **Pipeline Degradation Rate:** how often a stage was unavailable, by `stage` and `reason`. Anything above zero means answers are coming from a reduced pipeline. Fix the stage (embedder, reranker, vector store) before judging result quality.\n* **Candidates per Stage (avg):** how many candidates each stage returned. `lexical` near 0 while `semantic` is healthy points to a keyword coverage gap; both near 0 means little matching content.\n* **Memory-Store Query Duration / Hits (avg):** the same numbers for the `/query` endpoint only.\n* These averages hide individual queries. To see the exact queries that found nothing, with labels and filters, open **Mem0 — Query Misses**."
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
       "id": 1,
       "panels": [],
       "title": "Stage Latency",
@@ -36,22 +89,37 @@
       "id": 2,
       "title": "Retrieval Stage Duration (avg)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "custom": { "lineInterpolation": "smooth" }
+          "custom": {
+            "lineInterpolation": "smooth"
+          }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "calcs": ["mean", "max"],
+          "calcs": [
+            "mean",
+            "max"
+          ],
           "displayMode": "table",
           "placement": "bottom"
         },
-        "tooltip": { "mode": "multi" }
+        "tooltip": {
+          "mode": "multi"
+        }
       },
       "targets": [
         {
@@ -59,28 +127,44 @@
           "legendFormat": "{{stage}}",
           "refId": "A"
         }
-      ]
+      ],
+      "description": "Average seconds per stage: lexical, semantic, rerank, total."
     },
     {
       "id": 3,
       "title": "Retrieval Stage Duration (p99)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "custom": { "lineInterpolation": "smooth" }
+          "custom": {
+            "lineInterpolation": "smooth"
+          }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "calcs": ["mean", "max"],
+          "calcs": [
+            "mean",
+            "max"
+          ],
           "displayMode": "table",
           "placement": "bottom"
         },
-        "tooltip": { "mode": "multi" }
+        "tooltip": {
+          "mode": "multi"
+        }
       },
       "targets": [
         {
@@ -88,11 +172,17 @@
           "legendFormat": "{{stage}}",
           "refId": "A"
         }
-      ]
+      ],
+      "description": "Slowest 1% per stage. The stage whose p99 grows is the bottleneck."
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
       "id": 4,
       "panels": [],
       "title": "Degradations & Candidates",
@@ -102,23 +192,40 @@
       "id": 5,
       "title": "Pipeline Degradation Rate",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "cps",
-          "custom": { "lineInterpolation": "smooth" },
-          "color": { "mode": "palette-classic" }
+          "custom": {
+            "lineInterpolation": "smooth"
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "calcs": ["mean", "max"],
+          "calcs": [
+            "mean",
+            "max"
+          ],
           "displayMode": "table",
           "placement": "bottom"
         },
-        "tooltip": { "mode": "multi" }
+        "tooltip": {
+          "mode": "multi"
+        }
       },
       "targets": [
         {
@@ -126,28 +233,44 @@
           "legendFormat": "{{stage}} — {{reason}}",
           "refId": "A"
         }
-      ]
+      ],
+      "description": "Times per second a stage was unavailable, by stage and reason. Above zero means answers came from a reduced pipeline."
     },
     {
       "id": 6,
       "title": "Candidates per Stage (avg)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "custom": { "lineInterpolation": "smooth" }
+          "custom": {
+            "lineInterpolation": "smooth"
+          }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "calcs": ["mean", "max"],
+          "calcs": [
+            "mean",
+            "max"
+          ],
           "displayMode": "table",
           "placement": "bottom"
         },
-        "tooltip": { "mode": "multi" }
+        "tooltip": {
+          "mode": "multi"
+        }
       },
       "targets": [
         {
@@ -155,11 +278,17 @@
           "legendFormat": "{{stage}}",
           "refId": "A"
         }
-      ]
+      ],
+      "description": "Average number of candidates each stage returned. lexical near 0 with healthy semantic = keyword coverage gap."
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
       "id": 7,
       "panels": [],
       "title": "Memory-Store Queries",
@@ -169,22 +298,37 @@
       "id": 8,
       "title": "Memory-Store Query Duration (avg)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 29
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "custom": { "lineInterpolation": "smooth" }
+          "custom": {
+            "lineInterpolation": "smooth"
+          }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "calcs": ["mean", "max"],
+          "calcs": [
+            "mean",
+            "max"
+          ],
           "displayMode": "table",
           "placement": "bottom"
         },
-        "tooltip": { "mode": "multi" }
+        "tooltip": {
+          "mode": "multi"
+        }
       },
       "targets": [
         {
@@ -192,28 +336,44 @@
           "legendFormat": "memory_store",
           "refId": "A"
         }
-      ]
+      ],
+      "description": "Average latency of the /query endpoint only."
     },
     {
       "id": 9,
       "title": "Memory-Store Query Hits (avg count)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 29
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "custom": { "lineInterpolation": "smooth" }
+          "custom": {
+            "lineInterpolation": "smooth"
+          }
         },
         "overrides": []
       },
       "options": {
         "legend": {
-          "calcs": ["mean", "max"],
+          "calcs": [
+            "mean",
+            "max"
+          ],
           "displayMode": "table",
           "placement": "bottom"
         },
-        "tooltip": { "mode": "multi" }
+        "tooltip": {
+          "mode": "multi"
+        }
       },
       "targets": [
         {
@@ -221,7 +381,8 @@
           "legendFormat": "memory_store",
           "refId": "A"
         }
-      ]
+      ],
+      "description": "Average number of results per /query call."
     }
   ]
 }

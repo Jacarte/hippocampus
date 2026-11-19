@@ -68,6 +68,16 @@ class SearchRequest(BaseModel):
     run_id: str | None = None
     agent_id: str | None = None
     filters: dict[str, Any] | None = None
+    project: str | None = Field(
+        default=None,
+        description=(
+            "Optional project identifier (readable id sent by the client; falls "
+            "back to the hash parsed from user_id) used only to label "
+            "observability events. When omitted it is derived from a "
+            "':project:<hash>' user_id suffix. "
+            "It is never forwarded to the memory store as a filter."
+        ),
+    )
 
     @model_validator(mode="after")
     def promote_nested_entity_ids(self) -> "SearchRequest":
@@ -89,6 +99,16 @@ class RetrieveRequest(BaseModel):
         description="Maximum number of ranked results to return.",
     )
     filters: dict[str, Any] | None = None
+    project: str | None = Field(
+        default=None,
+        description=(
+            "Optional project identifier (readable id sent by the client; falls "
+            "back to the hash parsed from user_id) used only to label "
+            "observability events. When omitted it is derived from a "
+            "':project:<hash>' user_id suffix. "
+            "It is never forwarded to the memory store as a filter."
+        ),
+    )
 
     @model_validator(mode="after")
     def promote_nested_entity_ids(self) -> "RetrieveRequest":
@@ -144,6 +164,16 @@ class UnifiedQueryRequest(BaseModel):
             "per-user scoping.  When omitted the server applies no user filter."
         ),
     )
+    project: str | None = Field(
+        default=None,
+        description=(
+            "Optional project identifier (readable id sent by the client; falls "
+            "back to the hash parsed from user_id) used only to label "
+            "observability events. When omitted it is derived from a "
+            "':project:<hash>' user_id suffix. "
+            "It is never forwarded to the memory store as a filter."
+        ),
+    )
     min_score_memory: float = Field(
         default=0.5,
         ge=0.0,
@@ -188,8 +218,8 @@ class CapabilitiesResponse(BaseModel):
 # Admin / CMS contract models  (Task 1 — locked contract)
 # These are the additive admin request/response shapes for the internal CMS.
 # Decay scores are NOT computed here; the backend exposes raw fields and the
-# CMS computes display values using the plugin-authority formulas from
-# ~/.config/opencode/plugins/mem0-functional.ts.
+# CMS computes display values using the client plugin's authoritative
+# recency/decay formulas.
 # ---------------------------------------------------------------------------
 
 ScopeType = Literal["user", "agent", "run"]

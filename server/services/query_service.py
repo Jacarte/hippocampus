@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
 from api_models import MemoryHit, UnifiedQueryResponse
+from . import query_events
 from .metrics import query_duration_seconds, query_hits_count
+
+
+logger = logging.getLogger(__name__)
 
 
 class QueryService:
@@ -23,6 +28,7 @@ class QueryService:
         user_id: str | None = None,
         memory_instance: Any | None = None,
         min_score_memory: float = 0.5,
+        project: str | None = None,
     ) -> dict[str, Any]:
         """Return score-filtered memory hits and truthful query counts.
 
@@ -44,10 +50,11 @@ class QueryService:
 
         started_at = time.monotonic()
         raw_hits: list[MemoryHit] = []
+        retrieval_summary: dict[str, Any] | None = None
         degraded = False
         degradation_reasons: list[str] = []
         try:
-            raw_hits = self._query_memory_store(
+            raw_hits, retrieval_summary = self._query_memory_store(
                 query_text,
                 limit=limit,
                 user_id=user_id,
@@ -72,7 +79,7 @@ class QueryService:
         returned_hits = qualified_hits[:limit]
         query_hits_count.labels(corpus="memory_store").observe(len(returned_hits))
 
-        return UnifiedQueryResponse(
+        response = UnifiedQueryResponse(
             hits=returned_hits,
             total=len(raw_hits),
             corpora_queried=["memory_store"],
@@ -80,6 +87,69 @@ class QueryService:
             degraded=degraded,
             degradation_reasons=degradation_reasons,
         ).model_dump()
+        self._emit_query_events(
+            query_text=query_text,
+            limit=limit,
+            user_id=user_id,
+            project=project,
+            response=response,
+            retrieval_summary=retrieval_summary,
+            started_at=started_at,
+        )
+        return response
+
+    @staticmethod
+    def _emit_query_events(
+        *,
+        query_text: str,
+        limit: int,
+        user_id: str | None,
+        project: str | None,
+        response: dict[str, Any],
+        retrieval_summary: dict[str, Any] | None,
+        started_at: float,
+    ) -> None:
+        """Emit stdout query/hit events; never raises or alters the response.
+
+        Stage counts and degradation come from the underlying retrieval
+        response; ``candidates`` is the pre-threshold result count.
+        """
+        try:
+            resolved_project = query_events.derive_project(user_id, project)
+            hits = query_events.extract_memory_hits(response)
+            summary = retrieval_summary or query_events.summarize_retrieval(None)
+            reasons = list(response["degradation_reasons"])
+            reasons.extend(
+                reason
+                for reason in summary["degradation_reasons"]
+                if reason not in reasons
+            )
+            query_events.emit_query_event(
+                endpoint="query",
+                query=query_text,
+                limit=limit,
+                user_id=user_id,
+                agent_id=None,
+                run_id=None,
+                project=resolved_project,
+                hits=len(hits),
+                lexical=summary["lexical"],
+                semantic=summary["semantic"],
+                rerank=summary["rerank"],
+                degraded=bool(response["degraded"] or summary["degraded"]),
+                degradation_reasons=reasons,
+                latency_ms=(time.monotonic() - started_at) * 1000,
+                candidates=response["total"],
+            )
+            query_events.emit_memory_hits(
+                endpoint="query",
+                hits=hits,
+                user_id=user_id,
+                agent_id=None,
+                project=resolved_project,
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("query event emission failed", exc_info=True)
 
     def _query_memory_store(
         self,
@@ -88,8 +158,11 @@ class QueryService:
         limit: int,
         user_id: str | None,
         memory_instance: Any | None,
-    ) -> list[MemoryHit]:
+    ) -> tuple[list[MemoryHit], dict[str, Any] | None]:
         """Normalize retrieval results, or return no hits before memory startup.
+
+        Returns the hits and the retrieval response's stage/degradation summary
+        (``None`` when the retrieval boundary was not called).
 
         ``query_text`` and ``limit`` are always forwarded to the retrieval
         boundary. ``user_id`` is forwarded only when present. A missing memory
@@ -98,14 +171,14 @@ class QueryService:
         raise and are reported as degradation by :meth:`query`.
         """
         if memory_instance is None:
-            return []
+            return [], None
 
         kwargs: dict[str, Any] = {"query": query_text, "limit": limit}
         if user_id is not None:
             kwargs["user_id"] = user_id
 
         raw_response = self._retrieval.search(memory_instance, **kwargs)
-        return [
+        hits = [
             MemoryHit.model_validate(
                 {
                     "memory_id": str(result.get("id", "")),
@@ -118,6 +191,7 @@ class QueryService:
             )
             for result in self._coerce_memory_results(raw_response)
         ]
+        return hits, query_events.summarize_retrieval(raw_response)
 
     @staticmethod
     def _coerce_memory_results(raw_response: Any) -> list[dict[str, Any]]:

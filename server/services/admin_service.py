@@ -1503,9 +1503,8 @@ class AdminService:
         Pydantic instance keeps the contract shape uniform.
 
         The CMS uses these raw fields to compute recency/decay display
-        values using the plugin-authority formulas from
-        ``~/.config/opencode/plugins/mem0-functional.ts`` — this helper
-        does not compute a combined plugin score.
+        values using the client plugin's authoritative formulas — this
+        helper does not compute a combined plugin score.
 
         ``never_visited`` is copied from the aggregate so the wire shape
         exposes an explicit "cold" flag — never-visited memories must

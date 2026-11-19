@@ -12,7 +12,7 @@ if [ ! -f .env ]; then
 fi
 
 echo "📊 Creating data directories..."
-mkdir -p data/postgres data/mem0
+mkdir -p data/postgres data/mem0 data/loki
 
 echo "🐳 Starting Docker services..."
 docker-compose up -d --build

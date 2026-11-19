@@ -176,7 +176,7 @@ Setting `MEM0_RETRIEVAL_DECAY_ENABLED=true` adds a recency term to the
 `/retrieve` reranking stage:
 
 ```bash
-MEM0_RETRIEVAL_DECAY_ENABLED=true   # default false
+MEM0_RETRIEVAL_DECAY_ENABLED=true   # default false (Docker Compose defaults it to true)
 MEM0_RETRIEVAL_DECAY_WEIGHT=0.05    # default 0.05, must be >= 0
 ```
 
@@ -398,12 +398,6 @@ The bridge exposes one tool, `mgrep_query`, with these inputs:
 The MCP schema does not expose the HTTP-only `user_id` or `min_score_memory` inputs. Successful tool content contains the JSON-serialized `/query` response; how that text is rendered depends on the client.
 
 If a raw bridge call supplies the unsupported `file_corpus` value, the backend rejects it with HTTP `422`, and the bridge returns JSON-RPC error code `-32000` with the exact message `Backend error 422`. Transport failures use the fixed message `Backend request failed`, and unexpected internal failures use `Bridge error`. These public errors do not reflect backend response bodies, submitted inputs, transport details, or internal exception details. Unknown tools return JSON-RPC code `-32601`. The bridge does not expose memory creation, indexing, or lifecycle controls.
-
-### OpenCode memory plugin
-
-The maintained TypeScript OpenCode plugin is separate from the Python stdio MCP bridge above. To install it, copy `plugin-defs/opencode/mem0.ts` to either `.opencode/plugins/` or `~/.config/opencode/plugins/`, add the matching `@opencode-ai/plugin` and `@opencode-ai/sdk` dependencies to that configuration directory, and restart OpenCode. Set `MEM0_SERVER_URL=http://localhost:8000` explicitly for a local server. See the [installation guide](plugin-defs/opencode/README.md) and [functional guide](plugin-defs/opencode/functional.md) for the copy commands, pinned dependency versions, and configuration details.
-
-The plugin provides automatic recall, retrieval diagnostics, and memory context during compaction. Its `mem0` tool supports the `add`, `search`, `list`, `forget`, and `help` modes across the `user`, `project`, `agent`, and `environment` scopes. Automatic recall, explicit retrieval through `search`, and compaction use `POST /retrieve`; only add-time supersession detection uses `POST /search`.
 
 ### Identifier requirements
 
