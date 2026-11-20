@@ -1,7 +1,7 @@
 {
   "title": "Mem0 — Overview",
   "uid": "mem0-overview",
-  "version": 1,
+  "version": 3,
   "schemaVersion": 39,
   "refresh": "10s",
   "time": {
@@ -128,7 +128,7 @@
           "refId": "A"
         }
       ],
-      "description": "Requests per second by method, path and status code. Flat zero = nobody is calling the server."
+      "description": "Requests per second by method, path and status code. Flat zero = nobody is calling the server.\n\n**Read:** requests per second by method, path and status.\n\n**Look for:** flat zero (nobody calls the server) or unexpected paths.\n\n**Example:** constant `/metrics` only = Prometheus scraping, no real traffic."
     },
     {
       "id": 3,
@@ -176,7 +176,7 @@
           "refId": "A"
         }
       ],
-      "description": "Server errors per second. Any sustained line is a failing backend; check the server logs and Mem0 — Retrieval Pipeline."
+      "description": "Server errors per second. Any sustained line is a failing backend; check the server logs and Mem0 — Retrieval Pipeline.\n\n**Read:** 5xx responses per second.\n\n**Look for:** any sustained line.\n\n**Example:** 5xx on `/search` while Postgres is down."
     },
     {
       "id": 4,
@@ -221,7 +221,7 @@
           "refId": "A"
         }
       ],
-      "description": "Slowest 1% of requests per path. Compare with p50: a big gap means occasional slow stages, not a uniformly slow server."
+      "description": "Slowest 1% of requests per path. Compare with p50: a big gap means occasional slow stages, not a uniformly slow server.\n\n**Read:** the slowest 1% of requests per path.\n\n**Look for:** a big gap vs p50 = occasional slow stages.\n\n**Example:** `/retrieve` p99 8s but p50 0.7s = a slow rerank on some calls."
     },
     {
       "id": 5,
@@ -266,7 +266,7 @@
           "refId": "A"
         }
       ],
-      "description": "95th percentile latency per path."
+      "description": "95th percentile latency per path.\n\n**Read:** 95th percentile latency per path.\n\n**Look for:** steady increase over time.\n\n**Example:** `/search` p95 climbing as the corpus grows."
     },
     {
       "id": 6,
@@ -311,7 +311,7 @@
           "refId": "A"
         }
       ],
-      "description": "Median latency per path: the typical request."
+      "description": "Median latency per path: the typical request.\n\n**Read:** median latency: the typical request.\n\n**Look for:** step changes after deploys.\n\n**Example:** p50 jumps from 0.5s to 2s after enabling a new reranker."
     },
     {
       "collapsed": false,
@@ -369,7 +369,7 @@
           "refId": "A"
         }
       ],
-      "description": "Calls per second by operation, user_id and agent_id."
+      "description": "Calls per second by operation, user_id and agent_id.\n\n**Read:** memory operations per second.\n\n**Look for:** which operation dominates.\n\n**Example:** only `search` = read-only usage; `add` = capture is on."
     },
     {
       "id": 9,
@@ -416,7 +416,7 @@
           "refId": "A"
         }
       ],
-      "description": "Share of search/retrieve calls that returned at least one result. It drops when more queries find nothing; see Mem0 — Query Misses for which ones."
+      "description": "Share of search/retrieve calls that returned at least one result. It drops when more queries find nothing; see Mem0 — Query Misses for which ones.\n\n**Read:** share of search/retrieve calls returning at least one result.\n\n**Look for:** drops.\n\n**Example:** a drop to 0.4 = look at Query Misses to see the empty queries."
     }
   ]
 }

@@ -11,7 +11,11 @@ from fastapi import FastAPI
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from services.memory_policy import DEFAULT_MEMORY_INSTRUCTIONS, MEMORY_POLICY_VERSION
+from services.memory_policy import (
+    DEFAULT_MEMORY_INSTRUCTIONS,
+    EXTRACTED_MEMORY_TYPES,
+    MEMORY_POLICY_VERSION,
+)
 from services.runtime import get_config_from_env, initialize_memory
 
 
@@ -103,3 +107,15 @@ def test_pinned_sdk_accepts_the_effective_policy(monkeypatch):
     config = MemoryConfig(**get_config_from_env())
 
     assert config.custom_instructions == DEFAULT_MEMORY_INSTRUCTIONS
+
+
+def test_default_policy_asks_the_extractor_to_label_each_memory_type():
+    for memory_type in EXTRACTED_MEMORY_TYPES:
+        assert f'"{memory_type}"' in DEFAULT_MEMORY_INSTRUCTIONS
+    assert '"type" field' in DEFAULT_MEMORY_INSTRUCTIONS
+
+
+def test_extracted_memory_types_match_reranker_half_life_keys():
+    from services.retrieval_service import HeuristicReranker
+
+    assert EXTRACTED_MEMORY_TYPES == set(HeuristicReranker._DEFAULT_HALF_LIFE_DAYS)

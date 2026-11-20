@@ -192,7 +192,7 @@ MEM0_RETRIEVAL_DECAY_WEIGHT=0.05    # default 0.05, must be >= 0
   failing the request.
 - Half-life comes from `metadata.decay_half_life_days` when it is a positive
   number; otherwise it is derived from the memory type (`decision` and
-  `stable-fact` 30 days, `procedure` 7, `problem-fix` 4, default 4).
+  `stable-fact` 30 days, `procedure` 7, `problem-fix` 4, default 30 for untyped or unknown types).
 - The `/retrieve` response advertises the active ranking via
   `backend_capabilities.decay`, so clients can tell which ranking a deployment
   uses. Because decay is applied inside the rerank stage, `decay` is `false`
@@ -259,6 +259,13 @@ in `test_mem0_compatibility.py` skip when a live backend is unavailable.
 The mem0 2.0 series introduced breaking changes to the `PGVector` constructor (new required positional parameters `embedding_model_dims`, `diskann`, `hnsw`) and to `get_all`/`search` (entity IDs must now be passed inside a `filters` dict rather than as top-level kwargs). The server's `runtime.py`, `retrieval_service.py`, and `admin_service.py` handle these adaptations for the pinned 2.0.7 release.
 
 ### Memory selection and reliable writes
+
+The policy also asks the extractor to label each memory with a `type` (`decision`,
+`stable-fact`, `procedure`, `problem-fix`); the label is stored as top-level `type` and
+drives the decay half-life. A client-supplied `type`/`memory_type` always wins, and a
+missing or invalid label leaves the memory untyped. Overriding `custom_instructions`
+(`MEM0_CUSTOM_INSTRUCTIONS` or `/configure`) replaces this policy, so an override must
+include the labelling instruction or new memories go back to untyped.
 
 `POST /memories` accepts `infer` (default `true`). With inference enabled, the
 server supplies the versioned policy in `server/services/memory_policy.py` as

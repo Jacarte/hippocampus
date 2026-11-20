@@ -365,3 +365,150 @@ def test_real_sdk_missing_required_internals_fails_closed(missing):
         write(memory)
 
     assert original_store.insert_calls == []
+
+
+def typed_extraction(*items):
+    return json.dumps({"memory": [dict(item) for item in items]})
+
+
+def stored_types(memory):
+    return {
+        record["data"]: record.get("type")
+        for record in memory.vector_store.records.values()
+    }
+
+
+def test_extracted_type_is_persisted_in_the_stored_payload():
+    memory = memory_with(typed_extraction(
+        {"id": "0", "text": "Adopted Redis for cache", "type": "decision", "attributed_to": "user"},
+        {"id": "1", "text": "Fixed timeout with retry", "type": " Problem-Fix "},
+        {"id": "2", "text": "Run migrations before deploy", "type": "procedure"},
+        {"id": "3", "text": "Project uses Python 3.10", "type": "stable-fact"},
+    ))
+
+    result = write(memory)
+
+    assert len(result["results"]) == 4
+    assert stored_types(memory) == {
+        "Adopted Redis for cache": "decision",
+        "Fixed timeout with retry": "problem-fix",
+        "Run migrations before deploy": "procedure",
+        "Project uses Python 3.10": "stable-fact",
+    }
+    record = next(r for r in memory.vector_store.records.values() if r["type"] == "decision")
+    assert record["attributed_to"] == "user"
+    assert record["user_id"] == "write-compat-tests"
+
+
+def test_persisted_extracted_type_is_exposed_as_metadata_type_on_read():
+    class ReadableStore(StubVectorStore):
+        def get(self, *, vector_id):
+            return SimpleNamespace(id=vector_id, payload=self.records[vector_id])
+
+    memory = memory_with(
+        typed_extraction({"text": "Adopted Redis for cache", "type": "decision"}),
+        vector_store=ReadableStore(),
+    )
+
+    memory_id = write(memory)["results"][0]["id"]
+
+    assert memory.get(memory_id)["metadata"]["type"] == "decision"
+
+
+@pytest.mark.parametrize(
+    "label",
+    [None, "", "noise", "compaction-archive", "Decision!", 7, ["decision"], {"t": 1}],
+)
+def test_missing_or_invalid_extracted_type_leaves_memory_untyped(label):
+    item = {"text": "Observed fact"}
+    if label is not None:
+        item["type"] = label
+    memory = memory_with(typed_extraction(item))
+
+    result = write(memory)
+
+    assert [entry["memory"] for entry in result["results"]] == ["Observed fact"]
+    record = next(iter(memory.vector_store.records.values()))
+    assert "type" not in record
+
+
+def test_mixed_valid_and_invalid_types_only_label_valid_items():
+    memory = memory_with(typed_extraction(
+        {"text": "Adopted Redis for cache", "type": "decision"},
+        {"text": "Observed fact", "type": "unknown"},
+        {"text": "Other fact"},
+    ))
+
+    write(memory)
+
+    assert stored_types(memory) == {
+        "Adopted Redis for cache": "decision",
+        "Observed fact": None,
+        "Other fact": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "client_metadata",
+    [{"type": "procedure"}, {"type": "noise"}, {"type": None}, {"memory_type": "procedure"}],
+)
+def test_client_supplied_metadata_type_wins_over_extracted_type(client_metadata):
+    memory = memory_with(typed_extraction({"text": "Adopted Redis for cache", "type": "decision"}))
+
+    add_memories(
+        memory,
+        messages=[{"role": "user", "content": "Observed supported knowledge."}],
+        user_id="write-compat-tests",
+        metadata=dict(client_metadata),
+        infer=True,
+    )
+
+    record = next(iter(memory.vector_store.records.values()))
+    for key, value in client_metadata.items():
+        assert record[key] == value
+    if "type" not in client_metadata:
+        assert "type" not in record
+
+
+def test_extracted_type_survives_individual_insert_fallback():
+    store = StubVectorStore(batch_failure=True)
+    memory = memory_with(
+        typed_extraction(
+            {"text": "Decision A", "type": "decision"},
+            {"text": "Procedure B", "type": "procedure"},
+        ),
+        vector_store=store,
+    )
+
+    write(memory)
+
+    assert [len(ids) for ids in store.insert_calls] == [2, 1, 1]
+    assert stored_types(memory) == {"Decision A": "decision", "Procedure B": "procedure"}
+
+
+def test_extracted_types_do_not_leak_between_writes():
+    responses = iter([
+        typed_extraction({"text": "Shared text", "type": "decision"}),
+        typed_extraction({"text": "Shared text"}),
+    ])
+    memory = memory_with(lambda **kwargs: next(responses))
+
+    write(memory)
+    first_ids = set(memory.vector_store.records)
+    write(memory)
+
+    second = {k: v for k, v in memory.vector_store.records.items() if k not in first_ids}
+    assert [record.get("type") for record in second.values()] == [None]
+
+
+def test_default_policy_type_instruction_reaches_the_single_extraction_call():
+    from services.memory_policy import DEFAULT_MEMORY_INSTRUCTIONS
+
+    memory = memory_with(typed_extraction({"text": "Adopted Redis for cache", "type": "decision"}))
+    memory.custom_instructions = DEFAULT_MEMORY_INSTRUCTIONS
+
+    write(memory)
+
+    assert len(memory.llm.calls) == 1
+    user_prompt = memory.llm.calls[0]["messages"][-1]["content"]
+    assert '"type" field' in user_prompt

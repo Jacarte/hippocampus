@@ -27,6 +27,8 @@ import json
 from threading import RLock
 from typing import Any
 
+from .memory_policy import EXTRACTED_MEMORY_TYPES
+
 # Attributes the server currently relies on the mem0 ``Memory`` instance
 # to expose.  Centralised here so the access path is declared in one place
 # and a future mem0 release can be adapted by changing a single string.
@@ -149,6 +151,9 @@ class _WriteObservation:
     failed_embeddings: set[str] = field(default_factory=set)
     failed_inserts: set[str] = field(default_factory=set)
     persistence_started: bool = False
+    # Extracted memory text -> valid extractor label. The pinned SDK copies only
+    # ``text`` and ``attributed_to`` into the payload, so the insert proxy adds it.
+    extracted_types: dict[str, str] = field(default_factory=dict)
 
 
 class _ForwardingProxy:
@@ -182,6 +187,13 @@ class _ExtractionProxy(_ForwardingProxy):
                     or not item["text"].strip()
                 ):
                     raise ValueError("Invalid extracted memory text.")
+            for item in parsed["memory"]:
+                label = item.get("type")
+                if isinstance(label, str) and label.strip().lower() in EXTRACTED_MEMORY_TYPES:
+                    # The SDK keeps the first of duplicate texts; keep its label.
+                    self._observation.extracted_types.setdefault(
+                        item["text"], label.strip().lower()
+                    )
             return json.dumps(parsed)
         except Exception:
             self._observation.extraction_failed = True
@@ -221,6 +233,8 @@ class _EmbeddingProxy(_ForwardingProxy):
 class _InsertProxy(_ForwardingProxy):
     def insert(self, *, vectors: Any, ids: list[str], payloads: Any, **kwargs: Any) -> Any:
         self._observation.persistence_started = True
+        if self._observation.extracted_types:
+            payloads = [self._with_extracted_type(payload) for payload in payloads]
         try:
             result = self._target.insert(vectors=vectors, ids=ids, payloads=payloads, **kwargs)
         except Exception:
@@ -229,6 +243,14 @@ class _InsertProxy(_ForwardingProxy):
         # A successful per-record fallback resolves that record's batch error.
         self._observation.failed_inserts.difference_update(ids)
         return result
+
+    def _with_extracted_type(self, payload: Any) -> Any:
+        # Client metadata is already in the payload; its type always wins.
+        if not isinstance(payload, dict) or "type" in payload or "memory_type" in payload:
+            return payload
+        text = payload.get("data")
+        label = self._observation.extracted_types.get(text) if isinstance(text, str) else None
+        return {**payload, "type": label} if label else payload
 
 
 _ENTITY_STORE_INIT_LOCK = RLock()

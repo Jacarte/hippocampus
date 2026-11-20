@@ -1,0 +1,587 @@
+{
+  "title": "Mem0 — Decay",
+  "uid": "mem0-decay",
+  "version": 6,
+  "schemaVersion": 39,
+  "refresh": "5m",
+  "editable": true,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "tags": [
+    "mem0",
+    "decay",
+    "postgres"
+  ],
+  "links": [
+    {
+      "type": "dashboards",
+      "title": "Mem0 dashboards",
+      "tags": [
+        "mem0"
+      ],
+      "asDropdown": true,
+      "includeVars": false,
+      "keepTime": true,
+      "icon": "external link",
+      "targetBlank": false,
+      "tooltip": "",
+      "url": ""
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "user",
+        "label": "user",
+        "description": "User part of user_id (before ':project:')",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "mem0-pg"
+        },
+        "query": "SELECT DISTINCT split_part(payload->>'user_id', ':project:', 1) FROM public.mem0_memories ORDER BY 1",
+        "definition": "SELECT DISTINCT split_part(payload->>'user_id', ':project:', 1) FROM public.mem0_memories ORDER BY 1",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "regex": "",
+        "hide": 0
+      },
+      {
+        "name": "project",
+        "label": "project",
+        "description": "Project name (git remote, or legacy working directory); value is the hash in user_id",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "mem0-pg"
+        },
+        "query": "WITH names AS (\n  SELECT DISTINCT substr(encode(sha256(convert_to(payload->>'project_id','UTF8')),'hex'),1,24) AS h,\n    replace(payload->>'project_id','git:github.com/','') AS n\n  FROM public.mem0_memories WHERE payload->>'project_id' IS NOT NULL\n  UNION ALL SELECT * FROM (VALUES\n    ('275394e48903', 'herdr:sr-diff (ws)'),\n    ('434891ed1789', 'herdr:sr-report (ws)'),\n    ('eb0814a5d17f', 'herdr:sr-tools (ws)'),\n    ('88bcb4fe2bd8', 'herdr:bump2 (ws)'),\n    ('755fe80ece18', 'herdr:gomk (ws)'),\n    ('97acf0a98fa4', 'herdr:guardport (ws)'),\n    ('2d94084b266e', 'herdr:integration (ws)'),\n    ('bcd3429f8a16', 'herdr:modci (ws)'),\n    ('448895a6d5ac', 'herdr:shimscopy (ws)'),\n    ('9e2b1868701e', 'herdr:integration (ws)'),\n    ('05278a599f07', 'herdr:w-code (ws)'),\n    ('fc700ecb4882', 'pi-agent (cwd)'),\n    ('923bcd4cf93d', 'allas (cwd)'),\n    ('555a4ffaff2f', 'cash-k8s-config (cwd)'),\n    ('0040bb1858da', 'coi (cwd)'),\n    ('9aa971732b6a', 'developer-center (cwd)'),\n    ('dae292795937', 'discovery-mapper (cwd)'),\n    ('00d792601d6e', 'gluepay-auditchain (cwd)'),\n    ('4eb5d5cbb791', 'gluepay-core (cwd)'),\n    ('4f10dad44950', 'gluepay-core-ws-alloc (cwd)'),\n    ('7015f7d7a158', 'gluepay-events (cwd)'),\n    ('2b2293786574', 'gluepay-genskel (cwd)'),\n    ('939e8dc51427', 'gluepay-genskel-profiles (cwd)'),\n    ('608c92187fc2', 'gluepay-go (cwd)'),\n    ('1d9d5cd0fc7a', 'gluepay-kafka-proxy (cwd)'),\n    ('55beee9bb38d', 'hippocampus (cwd)'),\n    ('8d03a0034d28', 'pepi-eval-tasks (cwd)'),\n    ('1ce8cbeb3798', 'profiles2 (cwd)'),\n    ('73d9be7cf4f5', 'routing-service (cwd)'),\n    ('494e3eb7fdb0', 'routing-service-wt-auto-promote (cwd)'),\n    ('ea3954e908fd', 'salesforce-integration (cwd)'),\n    ('388bb2f2a2c7', 'schema (cwd)'),\n    ('e20637131d7f', 'sharing-pretty (cwd)'),\n    ('1ff29d668d37', 'workflows (cwd)'),\n    ('7cae04f2fb69', 'gkp-refresh (cwd)'),\n    ('bc16ed50d94a', 'pepi-eval-tasks (wt 5644)'),\n    ('879ae2bba2d0', 'pepi-eval-tasks (wt 58eb)'),\n    ('eee786b5a820', 'pepi-eval-tasks (wt 6106)'),\n    ('a24c01066757', 'pepi-eval-tasks (wt 91d8)'),\n    ('bb2301fda31d', 'pepi-eval-tasks (wt 9687)'),\n    ('f914736e8c14', 'pepi-eval-tasks (wt a4b6)'),\n    ('acca3a0273c1', 'pepi-eval-tasks (wt e380)'),\n    ('93cccb529197', 'avanza (cwd)')\n  ) AS legacy(h, n)\n)\nSELECT COALESCE(n.n, 'unknown ' || k.h) AS __text, k.h AS __value FROM (SELECT DISTINCT COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') AS h FROM public.mem0_memories) k LEFT JOIN names n ON n.h = k.h ORDER BY 1",
+        "definition": "WITH names AS (\n  SELECT DISTINCT substr(encode(sha256(convert_to(payload->>'project_id','UTF8')),'hex'),1,24) AS h,\n    replace(payload->>'project_id','git:github.com/','') AS n\n  FROM public.mem0_memories WHERE payload->>'project_id' IS NOT NULL\n  UNION ALL SELECT * FROM (VALUES\n    ('275394e48903', 'herdr:sr-diff (ws)'),\n    ('434891ed1789', 'herdr:sr-report (ws)'),\n    ('eb0814a5d17f', 'herdr:sr-tools (ws)'),\n    ('88bcb4fe2bd8', 'herdr:bump2 (ws)'),\n    ('755fe80ece18', 'herdr:gomk (ws)'),\n    ('97acf0a98fa4', 'herdr:guardport (ws)'),\n    ('2d94084b266e', 'herdr:integration (ws)'),\n    ('bcd3429f8a16', 'herdr:modci (ws)'),\n    ('448895a6d5ac', 'herdr:shimscopy (ws)'),\n    ('9e2b1868701e', 'herdr:integration (ws)'),\n    ('05278a599f07', 'herdr:w-code (ws)'),\n    ('fc700ecb4882', 'pi-agent (cwd)'),\n    ('923bcd4cf93d', 'allas (cwd)'),\n    ('555a4ffaff2f', 'cash-k8s-config (cwd)'),\n    ('0040bb1858da', 'coi (cwd)'),\n    ('9aa971732b6a', 'developer-center (cwd)'),\n    ('dae292795937', 'discovery-mapper (cwd)'),\n    ('00d792601d6e', 'gluepay-auditchain (cwd)'),\n    ('4eb5d5cbb791', 'gluepay-core (cwd)'),\n    ('4f10dad44950', 'gluepay-core-ws-alloc (cwd)'),\n    ('7015f7d7a158', 'gluepay-events (cwd)'),\n    ('2b2293786574', 'gluepay-genskel (cwd)'),\n    ('939e8dc51427', 'gluepay-genskel-profiles (cwd)'),\n    ('608c92187fc2', 'gluepay-go (cwd)'),\n    ('1d9d5cd0fc7a', 'gluepay-kafka-proxy (cwd)'),\n    ('55beee9bb38d', 'hippocampus (cwd)'),\n    ('8d03a0034d28', 'pepi-eval-tasks (cwd)'),\n    ('1ce8cbeb3798', 'profiles2 (cwd)'),\n    ('73d9be7cf4f5', 'routing-service (cwd)'),\n    ('494e3eb7fdb0', 'routing-service-wt-auto-promote (cwd)'),\n    ('ea3954e908fd', 'salesforce-integration (cwd)'),\n    ('388bb2f2a2c7', 'schema (cwd)'),\n    ('e20637131d7f', 'sharing-pretty (cwd)'),\n    ('1ff29d668d37', 'workflows (cwd)'),\n    ('7cae04f2fb69', 'gkp-refresh (cwd)'),\n    ('bc16ed50d94a', 'pepi-eval-tasks (wt 5644)'),\n    ('879ae2bba2d0', 'pepi-eval-tasks (wt 58eb)'),\n    ('eee786b5a820', 'pepi-eval-tasks (wt 6106)'),\n    ('a24c01066757', 'pepi-eval-tasks (wt 91d8)'),\n    ('bb2301fda31d', 'pepi-eval-tasks (wt 9687)'),\n    ('f914736e8c14', 'pepi-eval-tasks (wt a4b6)'),\n    ('acca3a0273c1', 'pepi-eval-tasks (wt e380)'),\n    ('93cccb529197', 'avanza (cwd)')\n  ) AS legacy(h, n)\n)\nSELECT COALESCE(n.n, 'unknown ' || k.h) AS __text, k.h AS __value FROM (SELECT DISTINCT COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') AS h FROM public.mem0_memories) k LEFT JOIN names n ON n.h = k.h ORDER BY 1",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "regex": "",
+        "hide": 0
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "How to read this dashboard",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 8
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "### How to read this dashboard\nDecay only affects `/retrieve` ranking: `recency = 0.5 ^ (age_days / half_life)`, then `score += recency × MEM0_RETRIEVAL_DECAY_WEIGHT` (default 0.05). Age uses `created_at` (edits do not reset it); an expired `ttl_expires_at` quarters recency.\n\n**Half-life**: explicit `decay_half_life_days`, else by type: decision / stable-fact 30d, procedure 7d, problem-fix 4d, anything else (including **untyped**) 30d.\n\n**What to look for**\n- *Untyped* memories fall back to 30 days (changed from 4 on 2026-11-20), so they stay distinguishable for months; the old 4-day value zeroed them after ~3 weeks.\n- Many memories in the `< 0.05` bucket means decay is effectively off for most of the corpus.\n- This shows the *corpus*, computed live from Postgres. It does not show what `/retrieve` actually returned.\n- Use the **user** and **project** filters at the top (project = hash after `:project:` in `user_id`) to focus every panel on one project or user. \"user / project filters\" apply to all panels except the reference curves."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Memories (with created_at)",
+      "description": "**Read:** how many memories have a `created_at` (decay needs it).\n\n**Look for:** growth after capture sessions.\n\n**Example:** ~6,000 = whole corpus; a sudden jump means a bulk import.",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mem0-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mem0-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH names AS (\n  SELECT DISTINCT substr(encode(sha256(convert_to(payload->>'project_id','UTF8')),'hex'),1,24) AS h,\n    replace(payload->>'project_id','git:github.com/','') AS n\n  FROM public.mem0_memories WHERE payload->>'project_id' IS NOT NULL\n  UNION ALL SELECT * FROM (VALUES\n    ('275394e48903', 'herdr:sr-diff (ws)'),\n    ('434891ed1789', 'herdr:sr-report (ws)'),\n    ('eb0814a5d17f', 'herdr:sr-tools (ws)'),\n    ('88bcb4fe2bd8', 'herdr:bump2 (ws)'),\n    ('755fe80ece18', 'herdr:gomk (ws)'),\n    ('97acf0a98fa4', 'herdr:guardport (ws)'),\n    ('2d94084b266e', 'herdr:integration (ws)'),\n    ('bcd3429f8a16', 'herdr:modci (ws)'),\n    ('448895a6d5ac', 'herdr:shimscopy (ws)'),\n    ('9e2b1868701e', 'herdr:integration (ws)'),\n    ('05278a599f07', 'herdr:w-code (ws)'),\n    ('fc700ecb4882', 'pi-agent (cwd)'),\n    ('923bcd4cf93d', 'allas (cwd)'),\n    ('555a4ffaff2f', 'cash-k8s-config (cwd)'),\n    ('0040bb1858da', 'coi (cwd)'),\n    ('9aa971732b6a', 'developer-center (cwd)'),\n    ('dae292795937', 'discovery-mapper (cwd)'),\n    ('00d792601d6e', 'gluepay-auditchain (cwd)'),\n    ('4eb5d5cbb791', 'gluepay-core (cwd)'),\n    ('4f10dad44950', 'gluepay-core-ws-alloc (cwd)'),\n    ('7015f7d7a158', 'gluepay-events (cwd)'),\n    ('2b2293786574', 'gluepay-genskel (cwd)'),\n    ('939e8dc51427', 'gluepay-genskel-profiles (cwd)'),\n    ('608c92187fc2', 'gluepay-go (cwd)'),\n    ('1d9d5cd0fc7a', 'gluepay-kafka-proxy (cwd)'),\n    ('55beee9bb38d', 'hippocampus (cwd)'),\n    ('8d03a0034d28', 'pepi-eval-tasks (cwd)'),\n    ('1ce8cbeb3798', 'profiles2 (cwd)'),\n    ('73d9be7cf4f5', 'routing-service (cwd)'),\n    ('494e3eb7fdb0', 'routing-service-wt-auto-promote (cwd)'),\n    ('ea3954e908fd', 'salesforce-integration (cwd)'),\n    ('388bb2f2a2c7', 'schema (cwd)'),\n    ('e20637131d7f', 'sharing-pretty (cwd)'),\n    ('1ff29d668d37', 'workflows (cwd)'),\n    ('7cae04f2fb69', 'gkp-refresh (cwd)'),\n    ('bc16ed50d94a', 'pepi-eval-tasks (wt 5644)'),\n    ('879ae2bba2d0', 'pepi-eval-tasks (wt 58eb)'),\n    ('eee786b5a820', 'pepi-eval-tasks (wt 6106)'),\n    ('a24c01066757', 'pepi-eval-tasks (wt 91d8)'),\n    ('bb2301fda31d', 'pepi-eval-tasks (wt 9687)'),\n    ('f914736e8c14', 'pepi-eval-tasks (wt a4b6)'),\n    ('acca3a0273c1', 'pepi-eval-tasks (wt e380)'),\n    ('93cccb529197', 'avanza (cwd)')\n  ) AS legacy(h, n)\n), m AS (\n  SELECT id,\n    COALESCE(payload->>'type','(untyped)') AS mtype,\n    (payload->>'created_at')::timestamptz AS created_at,\n    CASE WHEN payload->>'decay_half_life_days' ~ '^[0-9]+(\\.[0-9]+)?$' AND (payload->>'decay_half_life_days')::float > 0\n         THEN (payload->>'decay_half_life_days')::float\n         ELSE CASE payload->>'type' WHEN 'decision' THEN 30 WHEN 'stable-fact' THEN 30 WHEN 'procedure' THEN 7 WHEN 'problem-fix' THEN 4 ELSE 30 END END AS hl,\n    (payload->>'ttl_expires_at')::timestamptz AS ttl,\n    split_part(payload->>'user_id', ':project:', 1) AS usr,\n    COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') AS prj\n  FROM public.mem0_memories WHERE payload->>'created_at' IS NOT NULL\n    AND split_part(payload->>'user_id', ':project:', 1) IN ($user)\n    AND COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') IN ($project)\n), r AS (\n  SELECT *, COALESCE((SELECT n FROM names WHERE h = prj LIMIT 1), 'unknown ' || prj) AS pname, EXTRACT(EPOCH FROM (now()-created_at))/86400 AS age,\n    0.5 ^ (GREATEST(0, EXTRACT(EPOCH FROM (now()-created_at))/86400) / hl) * CASE WHEN ttl IS NOT NULL AND now()>ttl THEN 0.25 ELSE 1 END AS recency\n  FROM m\n)\nSELECT count(*) AS value FROM r"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Effectively decayed (recency < 0.05)",
+      "description": "**Read:** % of memories whose recency is under 0.05, so decay adds almost nothing to their score.\n\n**Look for:** above ~40% = decay barely differentiates.\n\n**Example:** 47% = half the corpus is too old to be boosted.",
+      "gridPos": {
+        "x": 6,
+        "y": 8,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mem0-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mem0-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH names AS (\n  SELECT DISTINCT substr(encode(sha256(convert_to(payload->>'project_id','UTF8')),'hex'),1,24) AS h,\n    replace(payload->>'project_id','git:github.com/','') AS n\n  FROM public.mem0_memories WHERE payload->>'project_id' IS NOT NULL\n  UNION ALL SELECT * FROM (VALUES\n    ('275394e48903', 'herdr:sr-diff (ws)'),\n    ('434891ed1789', 'herdr:sr-report (ws)'),\n    ('eb0814a5d17f', 'herdr:sr-tools (ws)'),\n    ('88bcb4fe2bd8', 'herdr:bump2 (ws)'),\n    ('755fe80ece18', 'herdr:gomk (ws)'),\n    ('97acf0a98fa4', 'herdr:guardport (ws)'),\n    ('2d94084b266e', 'herdr:integration (ws)'),\n    ('bcd3429f8a16', 'herdr:modci (ws)'),\n    ('448895a6d5ac', 'herdr:shimscopy (ws)'),\n    ('9e2b1868701e', 'herdr:integration (ws)'),\n    ('05278a599f07', 'herdr:w-code (ws)'),\n    ('fc700ecb4882', 'pi-agent (cwd)'),\n    ('923bcd4cf93d', 'allas (cwd)'),\n    ('555a4ffaff2f', 'cash-k8s-config (cwd)'),\n    ('0040bb1858da', 'coi (cwd)'),\n    ('9aa971732b6a', 'developer-center (cwd)'),\n    ('dae292795937', 'discovery-mapper (cwd)'),\n    ('00d792601d6e', 'gluepay-auditchain (cwd)'),\n    ('4eb5d5cbb791', 'gluepay-core (cwd)'),\n    ('4f10dad44950', 'gluepay-core-ws-alloc (cwd)'),\n    ('7015f7d7a158', 'gluepay-events (cwd)'),\n    ('2b2293786574', 'gluepay-genskel (cwd)'),\n    ('939e8dc51427', 'gluepay-genskel-profiles (cwd)'),\n    ('608c92187fc2', 'gluepay-go (cwd)'),\n    ('1d9d5cd0fc7a', 'gluepay-kafka-proxy (cwd)'),\n    ('55beee9bb38d', 'hippocampus (cwd)'),\n    ('8d03a0034d28', 'pepi-eval-tasks (cwd)'),\n    ('1ce8cbeb3798', 'profiles2 (cwd)'),\n    ('73d9be7cf4f5', 'routing-service (cwd)'),\n    ('494e3eb7fdb0', 'routing-service-wt-auto-promote (cwd)'),\n    ('ea3954e908fd', 'salesforce-integration (cwd)'),\n    ('388bb2f2a2c7', 'schema (cwd)'),\n    ('e20637131d7f', 'sharing-pretty (cwd)'),\n    ('1ff29d668d37', 'workflows (cwd)'),\n    ('7cae04f2fb69', 'gkp-refresh (cwd)'),\n    ('bc16ed50d94a', 'pepi-eval-tasks (wt 5644)'),\n    ('879ae2bba2d0', 'pepi-eval-tasks (wt 58eb)'),\n    ('eee786b5a820', 'pepi-eval-tasks (wt 6106)'),\n    ('a24c01066757', 'pepi-eval-tasks (wt 91d8)'),\n    ('bb2301fda31d', 'pepi-eval-tasks (wt 9687)'),\n    ('f914736e8c14', 'pepi-eval-tasks (wt a4b6)'),\n    ('acca3a0273c1', 'pepi-eval-tasks (wt e380)'),\n    ('93cccb529197', 'avanza (cwd)')\n  ) AS legacy(h, n)\n), m AS (\n  SELECT id,\n    COALESCE(payload->>'type','(untyped)') AS mtype,\n    (payload->>'created_at')::timestamptz AS created_at,\n    CASE WHEN payload->>'decay_half_life_days' ~ '^[0-9]+(\\.[0-9]+)?$' AND (payload->>'decay_half_life_days')::float > 0\n         THEN (payload->>'decay_half_life_days')::float\n         ELSE CASE payload->>'type' WHEN 'decision' THEN 30 WHEN 'stable-fact' THEN 30 WHEN 'procedure' THEN 7 WHEN 'problem-fix' THEN 4 ELSE 30 END END AS hl,\n    (payload->>'ttl_expires_at')::timestamptz AS ttl,\n    split_part(payload->>'user_id', ':project:', 1) AS usr,\n    COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') AS prj\n  FROM public.mem0_memories WHERE payload->>'created_at' IS NOT NULL\n    AND split_part(payload->>'user_id', ':project:', 1) IN ($user)\n    AND COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') IN ($project)\n), r AS (\n  SELECT *, COALESCE((SELECT n FROM names WHERE h = prj LIMIT 1), 'unknown ' || prj) AS pname, EXTRACT(EPOCH FROM (now()-created_at))/86400 AS age,\n    0.5 ^ (GREATEST(0, EXTRACT(EPOCH FROM (now()-created_at))/86400) / hl) * CASE WHEN ttl IS NOT NULL AND now()>ttl THEN 0.25 ELSE 1 END AS recency\n  FROM m\n)\nSELECT 100.0*count(*) FILTER (WHERE recency<0.05)/NULLIF(count(*),0) AS value FROM r"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Using fallback 30d half-life",
+      "description": "**Read:** % of memories on the 30-day fallback half-life (no `type`, no `decay_half_life_days`).\n\n**Look for:** near 100% = types are never set, so the 7d/4d curves are unused.\n\n**Fix idea:** set `type` on capture.",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mem0-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mem0-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH names AS (\n  SELECT DISTINCT substr(encode(sha256(convert_to(payload->>'project_id','UTF8')),'hex'),1,24) AS h,\n    replace(payload->>'project_id','git:github.com/','') AS n\n  FROM public.mem0_memories WHERE payload->>'project_id' IS NOT NULL\n  UNION ALL SELECT * FROM (VALUES\n    ('275394e48903', 'herdr:sr-diff (ws)'),\n    ('434891ed1789', 'herdr:sr-report (ws)'),\n    ('eb0814a5d17f', 'herdr:sr-tools (ws)'),\n    ('88bcb4fe2bd8', 'herdr:bump2 (ws)'),\n    ('755fe80ece18', 'herdr:gomk (ws)'),\n    ('97acf0a98fa4', 'herdr:guardport (ws)'),\n    ('2d94084b266e', 'herdr:integration (ws)'),\n    ('bcd3429f8a16', 'herdr:modci (ws)'),\n    ('448895a6d5ac', 'herdr:shimscopy (ws)'),\n    ('9e2b1868701e', 'herdr:integration (ws)'),\n    ('05278a599f07', 'herdr:w-code (ws)'),\n    ('fc700ecb4882', 'pi-agent (cwd)'),\n    ('923bcd4cf93d', 'allas (cwd)'),\n    ('555a4ffaff2f', 'cash-k8s-config (cwd)'),\n    ('0040bb1858da', 'coi (cwd)'),\n    ('9aa971732b6a', 'developer-center (cwd)'),\n    ('dae292795937', 'discovery-mapper (cwd)'),\n    ('00d792601d6e', 'gluepay-auditchain (cwd)'),\n    ('4eb5d5cbb791', 'gluepay-core (cwd)'),\n    ('4f10dad44950', 'gluepay-core-ws-alloc (cwd)'),\n    ('7015f7d7a158', 'gluepay-events (cwd)'),\n    ('2b2293786574', 'gluepay-genskel (cwd)'),\n    ('939e8dc51427', 'gluepay-genskel-profiles (cwd)'),\n    ('608c92187fc2', 'gluepay-go (cwd)'),\n    ('1d9d5cd0fc7a', 'gluepay-kafka-proxy (cwd)'),\n    ('55beee9bb38d', 'hippocampus (cwd)'),\n    ('8d03a0034d28', 'pepi-eval-tasks (cwd)'),\n    ('1ce8cbeb3798', 'profiles2 (cwd)'),\n    ('73d9be7cf4f5', 'routing-service (cwd)'),\n    ('494e3eb7fdb0', 'routing-service-wt-auto-promote (cwd)'),\n    ('ea3954e908fd', 'salesforce-integration (cwd)'),\n    ('388bb2f2a2c7', 'schema (cwd)'),\n    ('e20637131d7f', 'sharing-pretty (cwd)'),\n    ('1ff29d668d37', 'workflows (cwd)'),\n    ('7cae04f2fb69', 'gkp-refresh (cwd)'),\n    ('bc16ed50d94a', 'pepi-eval-tasks (wt 5644)'),\n    ('879ae2bba2d0', 'pepi-eval-tasks (wt 58eb)'),\n    ('eee786b5a820', 'pepi-eval-tasks (wt 6106)'),\n    ('a24c01066757', 'pepi-eval-tasks (wt 91d8)'),\n    ('bb2301fda31d', 'pepi-eval-tasks (wt 9687)'),\n    ('f914736e8c14', 'pepi-eval-tasks (wt a4b6)'),\n    ('acca3a0273c1', 'pepi-eval-tasks (wt e380)'),\n    ('93cccb529197', 'avanza (cwd)')\n  ) AS legacy(h, n)\n), m AS (\n  SELECT id,\n    COALESCE(payload->>'type','(untyped)') AS mtype,\n    (payload->>'created_at')::timestamptz AS created_at,\n    CASE WHEN payload->>'decay_half_life_days' ~ '^[0-9]+(\\.[0-9]+)?$' AND (payload->>'decay_half_life_days')::float > 0\n         THEN (payload->>'decay_half_life_days')::float\n         ELSE CASE payload->>'type' WHEN 'decision' THEN 30 WHEN 'stable-fact' THEN 30 WHEN 'procedure' THEN 7 WHEN 'problem-fix' THEN 4 ELSE 30 END END AS hl,\n    (payload->>'ttl_expires_at')::timestamptz AS ttl,\n    split_part(payload->>'user_id', ':project:', 1) AS usr,\n    COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') AS prj\n  FROM public.mem0_memories WHERE payload->>'created_at' IS NOT NULL\n    AND split_part(payload->>'user_id', ':project:', 1) IN ($user)\n    AND COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') IN ($project)\n), r AS (\n  SELECT *, COALESCE((SELECT n FROM names WHERE h = prj LIMIT 1), 'unknown ' || prj) AS pname, EXTRACT(EPOCH FROM (now()-created_at))/86400 AS age,\n    0.5 ^ (GREATEST(0, EXTRACT(EPOCH FROM (now()-created_at))/86400) / hl) * CASE WHEN ttl IS NOT NULL AND now()>ttl THEN 0.25 ELSE 1 END AS recency\n  FROM m\n)\nSELECT 100.0*count(*) FILTER (WHERE hl=30 AND payload_untyped)/NULLIF(count(*),0) AS value FROM (SELECT *, (mtype='(untyped)') AS payload_untyped FROM r) x"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Median age (days)",
+      "description": "**Read:** half of the memories are younger than this.\n\n**Example:** 17 days with a 30-day half-life means a typical memory has recency ~0.67.",
+      "gridPos": {
+        "x": 18,
+        "y": 8,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mem0-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mem0-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH names AS (\n  SELECT DISTINCT substr(encode(sha256(convert_to(payload->>'project_id','UTF8')),'hex'),1,24) AS h,\n    replace(payload->>'project_id','git:github.com/','') AS n\n  FROM public.mem0_memories WHERE payload->>'project_id' IS NOT NULL\n  UNION ALL SELECT * FROM (VALUES\n    ('275394e48903', 'herdr:sr-diff (ws)'),\n    ('434891ed1789', 'herdr:sr-report (ws)'),\n    ('eb0814a5d17f', 'herdr:sr-tools (ws)'),\n    ('88bcb4fe2bd8', 'herdr:bump2 (ws)'),\n    ('755fe80ece18', 'herdr:gomk (ws)'),\n    ('97acf0a98fa4', 'herdr:guardport (ws)'),\n    ('2d94084b266e', 'herdr:integration (ws)'),\n    ('bcd3429f8a16', 'herdr:modci (ws)'),\n    ('448895a6d5ac', 'herdr:shimscopy (ws)'),\n    ('9e2b1868701e', 'herdr:integration (ws)'),\n    ('05278a599f07', 'herdr:w-code (ws)'),\n    ('fc700ecb4882', 'pi-agent (cwd)'),\n    ('923bcd4cf93d', 'allas (cwd)'),\n    ('555a4ffaff2f', 'cash-k8s-config (cwd)'),\n    ('0040bb1858da', 'coi (cwd)'),\n    ('9aa971732b6a', 'developer-center (cwd)'),\n    ('dae292795937', 'discovery-mapper (cwd)'),\n    ('00d792601d6e', 'gluepay-auditchain (cwd)'),\n    ('4eb5d5cbb791', 'gluepay-core (cwd)'),\n    ('4f10dad44950', 'gluepay-core-ws-alloc (cwd)'),\n    ('7015f7d7a158', 'gluepay-events (cwd)'),\n    ('2b2293786574', 'gluepay-genskel (cwd)'),\n    ('939e8dc51427', 'gluepay-genskel-profiles (cwd)'),\n    ('608c92187fc2', 'gluepay-go (cwd)'),\n    ('1d9d5cd0fc7a', 'gluepay-kafka-proxy (cwd)'),\n    ('55beee9bb38d', 'hippocampus (cwd)'),\n    ('8d03a0034d28', 'pepi-eval-tasks (cwd)'),\n    ('1ce8cbeb3798', 'profiles2 (cwd)'),\n    ('73d9be7cf4f5', 'routing-service (cwd)'),\n    ('494e3eb7fdb0', 'routing-service-wt-auto-promote (cwd)'),\n    ('ea3954e908fd', 'salesforce-integration (cwd)'),\n    ('388bb2f2a2c7', 'schema (cwd)'),\n    ('e20637131d7f', 'sharing-pretty (cwd)'),\n    ('1ff29d668d37', 'workflows (cwd)'),\n    ('7cae04f2fb69', 'gkp-refresh (cwd)'),\n    ('bc16ed50d94a', 'pepi-eval-tasks (wt 5644)'),\n    ('879ae2bba2d0', 'pepi-eval-tasks (wt 58eb)'),\n    ('eee786b5a820', 'pepi-eval-tasks (wt 6106)'),\n    ('a24c01066757', 'pepi-eval-tasks (wt 91d8)'),\n    ('bb2301fda31d', 'pepi-eval-tasks (wt 9687)'),\n    ('f914736e8c14', 'pepi-eval-tasks (wt a4b6)'),\n    ('acca3a0273c1', 'pepi-eval-tasks (wt e380)'),\n    ('93cccb529197', 'avanza (cwd)')\n  ) AS legacy(h, n)\n), m AS (\n  SELECT id,\n    COALESCE(payload->>'type','(untyped)') AS mtype,\n    (payload->>'created_at')::timestamptz AS created_at,\n    CASE WHEN payload->>'decay_half_life_days' ~ '^[0-9]+(\\.[0-9]+)?$' AND (payload->>'decay_half_life_days')::float > 0\n         THEN (payload->>'decay_half_life_days')::float\n         ELSE CASE payload->>'type' WHEN 'decision' THEN 30 WHEN 'stable-fact' THEN 30 WHEN 'procedure' THEN 7 WHEN 'problem-fix' THEN 4 ELSE 30 END END AS hl,\n    (payload->>'ttl_expires_at')::timestamptz AS ttl,\n    split_part(payload->>'user_id', ':project:', 1) AS usr,\n    COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') AS prj\n  FROM public.mem0_memories WHERE payload->>'created_at' IS NOT NULL\n    AND split_part(payload->>'user_id', ':project:', 1) IN ($user)\n    AND COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') IN ($project)\n), r AS (\n  SELECT *, COALESCE((SELECT n FROM names WHERE h = prj LIMIT 1), 'unknown ' || prj) AS pname, EXTRACT(EPOCH FROM (now()-created_at))/86400 AS age,\n    0.5 ^ (GREATEST(0, EXTRACT(EPOCH FROM (now()-created_at))/86400) / hl) * CASE WHEN ttl IS NOT NULL AND now()>ttl THEN 0.25 ELSE 1 END AS recency\n  FROM m\n)\nSELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY age) AS value FROM r"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "d"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "barchart",
+      "title": "Memories by recency bucket and type",
+      "description": "Where the corpus sits on the decay curve right now, split by explicit memory type.\n\n**Read:** each bar is a recency range (left = fully decayed, right = fresh). Colours are the stored `type`: `untyped` (no type, 30-day fallback), `decision` and `stable-fact` (30-day half-life), `procedure` (7 days), `problem-fix` (4 days), `other` (any other string).\n\n**Look for:** `procedure` and `problem-fix` piling up in the left buckets (they fade fast), and `untyped` dominating (types are not being assigned). New captures should show typed colours on the right.\n\n**Example:** 2,739 `untyped` in `<0.05`, while `stable-fact` only appears in the `0.5-0.75` and `>=0.75` buckets because recent captures are typed.",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 10
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mem0-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mem0-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH names AS (\n  SELECT DISTINCT substr(encode(sha256(convert_to(payload->>'project_id','UTF8')),'hex'),1,24) AS h,\n    replace(payload->>'project_id','git:github.com/','') AS n\n  FROM public.mem0_memories WHERE payload->>'project_id' IS NOT NULL\n  UNION ALL SELECT * FROM (VALUES\n    ('275394e48903', 'herdr:sr-diff (ws)'),\n    ('434891ed1789', 'herdr:sr-report (ws)'),\n    ('eb0814a5d17f', 'herdr:sr-tools (ws)'),\n    ('88bcb4fe2bd8', 'herdr:bump2 (ws)'),\n    ('755fe80ece18', 'herdr:gomk (ws)'),\n    ('97acf0a98fa4', 'herdr:guardport (ws)'),\n    ('2d94084b266e', 'herdr:integration (ws)'),\n    ('bcd3429f8a16', 'herdr:modci (ws)'),\n    ('448895a6d5ac', 'herdr:shimscopy (ws)'),\n    ('9e2b1868701e', 'herdr:integration (ws)'),\n    ('05278a599f07', 'herdr:w-code (ws)'),\n    ('fc700ecb4882', 'pi-agent (cwd)'),\n    ('923bcd4cf93d', 'allas (cwd)'),\n    ('555a4ffaff2f', 'cash-k8s-config (cwd)'),\n    ('0040bb1858da', 'coi (cwd)'),\n    ('9aa971732b6a', 'developer-center (cwd)'),\n    ('dae292795937', 'discovery-mapper (cwd)'),\n    ('00d792601d6e', 'gluepay-auditchain (cwd)'),\n    ('4eb5d5cbb791', 'gluepay-core (cwd)'),\n    ('4f10dad44950', 'gluepay-core-ws-alloc (cwd)'),\n    ('7015f7d7a158', 'gluepay-events (cwd)'),\n    ('2b2293786574', 'gluepay-genskel (cwd)'),\n    ('939e8dc51427', 'gluepay-genskel-profiles (cwd)'),\n    ('608c92187fc2', 'gluepay-go (cwd)'),\n    ('1d9d5cd0fc7a', 'gluepay-kafka-proxy (cwd)'),\n    ('55beee9bb38d', 'hippocampus (cwd)'),\n    ('8d03a0034d28', 'pepi-eval-tasks (cwd)'),\n    ('1ce8cbeb3798', 'profiles2 (cwd)'),\n    ('73d9be7cf4f5', 'routing-service (cwd)'),\n    ('494e3eb7fdb0', 'routing-service-wt-auto-promote (cwd)'),\n    ('ea3954e908fd', 'salesforce-integration (cwd)'),\n    ('388bb2f2a2c7', 'schema (cwd)'),\n    ('e20637131d7f', 'sharing-pretty (cwd)'),\n    ('1ff29d668d37', 'workflows (cwd)'),\n    ('7cae04f2fb69', 'gkp-refresh (cwd)'),\n    ('bc16ed50d94a', 'pepi-eval-tasks (wt 5644)'),\n    ('879ae2bba2d0', 'pepi-eval-tasks (wt 58eb)'),\n    ('eee786b5a820', 'pepi-eval-tasks (wt 6106)'),\n    ('a24c01066757', 'pepi-eval-tasks (wt 91d8)'),\n    ('bb2301fda31d', 'pepi-eval-tasks (wt 9687)'),\n    ('f914736e8c14', 'pepi-eval-tasks (wt a4b6)'),\n    ('acca3a0273c1', 'pepi-eval-tasks (wt e380)'),\n    ('93cccb529197', 'avanza (cwd)')\n  ) AS legacy(h, n)\n), m AS (\n  SELECT id,\n    COALESCE(payload->>'type','(untyped)') AS mtype,\n    (payload->>'created_at')::timestamptz AS created_at,\n    CASE WHEN payload->>'decay_half_life_days' ~ '^[0-9]+(\\.[0-9]+)?$' AND (payload->>'decay_half_life_days')::float > 0\n         THEN (payload->>'decay_half_life_days')::float\n         ELSE CASE payload->>'type' WHEN 'decision' THEN 30 WHEN 'stable-fact' THEN 30 WHEN 'procedure' THEN 7 WHEN 'problem-fix' THEN 4 ELSE 30 END END AS hl,\n    (payload->>'ttl_expires_at')::timestamptz AS ttl,\n    split_part(payload->>'user_id', ':project:', 1) AS usr,\n    COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') AS prj\n  FROM public.mem0_memories WHERE payload->>'created_at' IS NOT NULL\n    AND split_part(payload->>'user_id', ':project:', 1) IN ($user)\n    AND COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') IN ($project)\n), r AS (\n  SELECT *, COALESCE((SELECT n FROM names WHERE h = prj LIMIT 1), 'unknown ' || prj) AS pname, EXTRACT(EPOCH FROM (now()-created_at))/86400 AS age,\n    0.5 ^ (GREATEST(0, EXTRACT(EPOCH FROM (now()-created_at))/86400) / hl) * CASE WHEN ttl IS NOT NULL AND now()>ttl THEN 0.25 ELSE 1 END AS recency\n  FROM m\n)\nSELECT CASE WHEN recency<0.05 THEN '1: <0.05' WHEN recency<0.25 THEN '2: 0.05-0.25' WHEN recency<0.5 THEN '3: 0.25-0.5' WHEN recency<0.75 THEN '4: 0.5-0.75' ELSE '5: >=0.75' END AS bucket,\n count(*) FILTER (WHERE mtype='(untyped)') AS untyped,\n count(*) FILTER (WHERE mtype='decision') AS decision,\n count(*) FILTER (WHERE mtype='stable-fact') AS \"stable-fact\",\n count(*) FILTER (WHERE mtype='procedure') AS procedure,\n count(*) FILTER (WHERE mtype='problem-fix') AS \"problem-fix\",\n count(*) FILTER (WHERE mtype NOT IN ('(untyped)','decision','stable-fact','procedure','problem-fix')) AS other\nFROM r GROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "options": {
+        "xField": "bucket",
+        "stacking": "normal",
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Decay curves by half-life (recency vs age)",
+      "description": "X axis is age in days (shown as 1970 dates, day 0 = Jan 1). Reference curves only.\n\n**Read:** the three decay curves. X = age in days (day 0 = 1 Jan 1970), Y = recency 0..1.\n\n**Look for:** where a curve crosses 0.5 (= its half-life).\n\n**Example:** at day 12 a 4-day memory is at 0.125 while a 30-day one is still at 0.76.",
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 10
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mem0-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mem0-pg"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH names AS (\n  SELECT DISTINCT substr(encode(sha256(convert_to(payload->>'project_id','UTF8')),'hex'),1,24) AS h,\n    replace(payload->>'project_id','git:github.com/','') AS n\n  FROM public.mem0_memories WHERE payload->>'project_id' IS NOT NULL\n  UNION ALL SELECT * FROM (VALUES\n    ('275394e48903', 'herdr:sr-diff (ws)'),\n    ('434891ed1789', 'herdr:sr-report (ws)'),\n    ('eb0814a5d17f', 'herdr:sr-tools (ws)'),\n    ('88bcb4fe2bd8', 'herdr:bump2 (ws)'),\n    ('755fe80ece18', 'herdr:gomk (ws)'),\n    ('97acf0a98fa4', 'herdr:guardport (ws)'),\n    ('2d94084b266e', 'herdr:integration (ws)'),\n    ('bcd3429f8a16', 'herdr:modci (ws)'),\n    ('448895a6d5ac', 'herdr:shimscopy (ws)'),\n    ('9e2b1868701e', 'herdr:integration (ws)'),\n    ('05278a599f07', 'herdr:w-code (ws)'),\n    ('fc700ecb4882', 'pi-agent (cwd)'),\n    ('923bcd4cf93d', 'allas (cwd)'),\n    ('555a4ffaff2f', 'cash-k8s-config (cwd)'),\n    ('0040bb1858da', 'coi (cwd)'),\n    ('9aa971732b6a', 'developer-center (cwd)'),\n    ('dae292795937', 'discovery-mapper (cwd)'),\n    ('00d792601d6e', 'gluepay-auditchain (cwd)'),\n    ('4eb5d5cbb791', 'gluepay-core (cwd)'),\n    ('4f10dad44950', 'gluepay-core-ws-alloc (cwd)'),\n    ('7015f7d7a158', 'gluepay-events (cwd)'),\n    ('2b2293786574', 'gluepay-genskel (cwd)'),\n    ('939e8dc51427', 'gluepay-genskel-profiles (cwd)'),\n    ('608c92187fc2', 'gluepay-go (cwd)'),\n    ('1d9d5cd0fc7a', 'gluepay-kafka-proxy (cwd)'),\n    ('55beee9bb38d', 'hippocampus (cwd)'),\n    ('8d03a0034d28', 'pepi-eval-tasks (cwd)'),\n    ('1ce8cbeb3798', 'profiles2 (cwd)'),\n    ('73d9be7cf4f5', 'routing-service (cwd)'),\n    ('494e3eb7fdb0', 'routing-service-wt-auto-promote (cwd)'),\n    ('ea3954e908fd', 'salesforce-integration (cwd)'),\n    ('388bb2f2a2c7', 'schema (cwd)'),\n    ('e20637131d7f', 'sharing-pretty (cwd)'),\n    ('1ff29d668d37', 'workflows (cwd)'),\n    ('7cae04f2fb69', 'gkp-refresh (cwd)'),\n    ('bc16ed50d94a', 'pepi-eval-tasks (wt 5644)'),\n    ('879ae2bba2d0', 'pepi-eval-tasks (wt 58eb)'),\n    ('eee786b5a820', 'pepi-eval-tasks (wt 6106)'),\n    ('a24c01066757', 'pepi-eval-tasks (wt 91d8)'),\n    ('bb2301fda31d', 'pepi-eval-tasks (wt 9687)'),\n    ('f914736e8c14', 'pepi-eval-tasks (wt a4b6)'),\n    ('acca3a0273c1', 'pepi-eval-tasks (wt e380)'),\n    ('93cccb529197', 'avanza (cwd)')\n  ) AS legacy(h, n)\n), m AS (\n  SELECT id,\n    COALESCE(payload->>'type','(untyped)') AS mtype,\n    (payload->>'created_at')::timestamptz AS created_at,\n    CASE WHEN payload->>'decay_half_life_days' ~ '^[0-9]+(\\.[0-9]+)?$' AND (payload->>'decay_half_life_days')::float > 0\n         THEN (payload->>'decay_half_life_days')::float\n         ELSE CASE payload->>'type' WHEN 'decision' THEN 30 WHEN 'stable-fact' THEN 30 WHEN 'procedure' THEN 7 WHEN 'problem-fix' THEN 4 ELSE 30 END END AS hl,\n    (payload->>'ttl_expires_at')::timestamptz AS ttl,\n    split_part(payload->>'user_id', ':project:', 1) AS usr,\n    COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') AS prj\n  FROM public.mem0_memories WHERE payload->>'created_at' IS NOT NULL\n    AND split_part(payload->>'user_id', ':project:', 1) IN ($user)\n    AND COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') IN ($project)\n), r AS (\n  SELECT *, COALESCE((SELECT n FROM names WHERE h = prj LIMIT 1), 'unknown ' || prj) AS pname, EXTRACT(EPOCH FROM (now()-created_at))/86400 AS age,\n    0.5 ^ (GREATEST(0, EXTRACT(EPOCH FROM (now()-created_at))/86400) / hl) * CASE WHEN ttl IS NOT NULL AND now()>ttl THEN 0.25 ELSE 1 END AS recency\n  FROM m\n)\nSELECT to_timestamp(d*86400) AS time, 0.5^(d/4.0) AS \"4d (problem-fix)\", 0.5^(d/7.0) AS \"7d (procedure)\", 0.5^(d/30.0) AS \"30d (untyped/decision/stable-fact)\"\nFROM generate_series(0,90) d ORDER BY 1"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "bargauge",
+      "title": "Memories by effective half-life",
+      "description": "**Read:** how many memories use each effective half-life.\n\n**Look for:** one huge bar on `30 days` = the untyped fallback dominates and type-based curves are rarely used.\n\n**Example:** 5,783 on 30d vs 30 on 7d: only a handful get a shorter memory.",
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mem0-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mem0-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH names AS (\n  SELECT DISTINCT substr(encode(sha256(convert_to(payload->>'project_id','UTF8')),'hex'),1,24) AS h,\n    replace(payload->>'project_id','git:github.com/','') AS n\n  FROM public.mem0_memories WHERE payload->>'project_id' IS NOT NULL\n  UNION ALL SELECT * FROM (VALUES\n    ('275394e48903', 'herdr:sr-diff (ws)'),\n    ('434891ed1789', 'herdr:sr-report (ws)'),\n    ('eb0814a5d17f', 'herdr:sr-tools (ws)'),\n    ('88bcb4fe2bd8', 'herdr:bump2 (ws)'),\n    ('755fe80ece18', 'herdr:gomk (ws)'),\n    ('97acf0a98fa4', 'herdr:guardport (ws)'),\n    ('2d94084b266e', 'herdr:integration (ws)'),\n    ('bcd3429f8a16', 'herdr:modci (ws)'),\n    ('448895a6d5ac', 'herdr:shimscopy (ws)'),\n    ('9e2b1868701e', 'herdr:integration (ws)'),\n    ('05278a599f07', 'herdr:w-code (ws)'),\n    ('fc700ecb4882', 'pi-agent (cwd)'),\n    ('923bcd4cf93d', 'allas (cwd)'),\n    ('555a4ffaff2f', 'cash-k8s-config (cwd)'),\n    ('0040bb1858da', 'coi (cwd)'),\n    ('9aa971732b6a', 'developer-center (cwd)'),\n    ('dae292795937', 'discovery-mapper (cwd)'),\n    ('00d792601d6e', 'gluepay-auditchain (cwd)'),\n    ('4eb5d5cbb791', 'gluepay-core (cwd)'),\n    ('4f10dad44950', 'gluepay-core-ws-alloc (cwd)'),\n    ('7015f7d7a158', 'gluepay-events (cwd)'),\n    ('2b2293786574', 'gluepay-genskel (cwd)'),\n    ('939e8dc51427', 'gluepay-genskel-profiles (cwd)'),\n    ('608c92187fc2', 'gluepay-go (cwd)'),\n    ('1d9d5cd0fc7a', 'gluepay-kafka-proxy (cwd)'),\n    ('55beee9bb38d', 'hippocampus (cwd)'),\n    ('8d03a0034d28', 'pepi-eval-tasks (cwd)'),\n    ('1ce8cbeb3798', 'profiles2 (cwd)'),\n    ('73d9be7cf4f5', 'routing-service (cwd)'),\n    ('494e3eb7fdb0', 'routing-service-wt-auto-promote (cwd)'),\n    ('ea3954e908fd', 'salesforce-integration (cwd)'),\n    ('388bb2f2a2c7', 'schema (cwd)'),\n    ('e20637131d7f', 'sharing-pretty (cwd)'),\n    ('1ff29d668d37', 'workflows (cwd)'),\n    ('7cae04f2fb69', 'gkp-refresh (cwd)'),\n    ('bc16ed50d94a', 'pepi-eval-tasks (wt 5644)'),\n    ('879ae2bba2d0', 'pepi-eval-tasks (wt 58eb)'),\n    ('eee786b5a820', 'pepi-eval-tasks (wt 6106)'),\n    ('a24c01066757', 'pepi-eval-tasks (wt 91d8)'),\n    ('bb2301fda31d', 'pepi-eval-tasks (wt 9687)'),\n    ('f914736e8c14', 'pepi-eval-tasks (wt a4b6)'),\n    ('acca3a0273c1', 'pepi-eval-tasks (wt e380)'),\n    ('93cccb529197', 'avanza (cwd)')\n  ) AS legacy(h, n)\n), m AS (\n  SELECT id,\n    COALESCE(payload->>'type','(untyped)') AS mtype,\n    (payload->>'created_at')::timestamptz AS created_at,\n    CASE WHEN payload->>'decay_half_life_days' ~ '^[0-9]+(\\.[0-9]+)?$' AND (payload->>'decay_half_life_days')::float > 0\n         THEN (payload->>'decay_half_life_days')::float\n         ELSE CASE payload->>'type' WHEN 'decision' THEN 30 WHEN 'stable-fact' THEN 30 WHEN 'procedure' THEN 7 WHEN 'problem-fix' THEN 4 ELSE 30 END END AS hl,\n    (payload->>'ttl_expires_at')::timestamptz AS ttl,\n    split_part(payload->>'user_id', ':project:', 1) AS usr,\n    COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') AS prj\n  FROM public.mem0_memories WHERE payload->>'created_at' IS NOT NULL\n    AND split_part(payload->>'user_id', ':project:', 1) IN ($user)\n    AND COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') IN ($project)\n), r AS (\n  SELECT *, COALESCE((SELECT n FROM names WHERE h = prj LIMIT 1), 'unknown ' || prj) AS pname, EXTRACT(EPOCH FROM (now()-created_at))/86400 AS age,\n    0.5 ^ (GREATEST(0, EXTRACT(EPOCH FROM (now()-created_at))/86400) / hl) * CASE WHEN ttl IS NOT NULL AND now()>ttl THEN 0.25 ELSE 1 END AS recency\n  FROM m\n)\nSELECT hl::text || ' days' AS half_life, count(*) AS memories FROM r GROUP BY hl ORDER BY hl"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "/^memories$/",
+          "values": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Age and recency by user and project",
+      "description": "One row per user and project hash (both from `user_id`).\n\n**Read:** `typed_pct` = share with a `type`; `avg_recency` = mean decay score now (1 = fresh, 0 = fully decayed); `decayed` = memories with recency < 0.05; `last_7d` = created in the last 7 days.\n\n**Look for:** projects with a high `decayed` share and low `last_7d` are fading; low `typed_pct` means decay uses the 30-day fallback.\n\n**Example:** project `1d9d5cd0fc7a` with median age 36 days and 995 of 1,333 decayed is an older project; one with `last_7d` in the hundreds is active.",
+      "gridPos": {
+        "x": 8,
+        "y": 22,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mem0-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mem0-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH names AS (\n  SELECT DISTINCT substr(encode(sha256(convert_to(payload->>'project_id','UTF8')),'hex'),1,24) AS h,\n    replace(payload->>'project_id','git:github.com/','') AS n\n  FROM public.mem0_memories WHERE payload->>'project_id' IS NOT NULL\n  UNION ALL SELECT * FROM (VALUES\n    ('275394e48903', 'herdr:sr-diff (ws)'),\n    ('434891ed1789', 'herdr:sr-report (ws)'),\n    ('eb0814a5d17f', 'herdr:sr-tools (ws)'),\n    ('88bcb4fe2bd8', 'herdr:bump2 (ws)'),\n    ('755fe80ece18', 'herdr:gomk (ws)'),\n    ('97acf0a98fa4', 'herdr:guardport (ws)'),\n    ('2d94084b266e', 'herdr:integration (ws)'),\n    ('bcd3429f8a16', 'herdr:modci (ws)'),\n    ('448895a6d5ac', 'herdr:shimscopy (ws)'),\n    ('9e2b1868701e', 'herdr:integration (ws)'),\n    ('05278a599f07', 'herdr:w-code (ws)'),\n    ('fc700ecb4882', 'pi-agent (cwd)'),\n    ('923bcd4cf93d', 'allas (cwd)'),\n    ('555a4ffaff2f', 'cash-k8s-config (cwd)'),\n    ('0040bb1858da', 'coi (cwd)'),\n    ('9aa971732b6a', 'developer-center (cwd)'),\n    ('dae292795937', 'discovery-mapper (cwd)'),\n    ('00d792601d6e', 'gluepay-auditchain (cwd)'),\n    ('4eb5d5cbb791', 'gluepay-core (cwd)'),\n    ('4f10dad44950', 'gluepay-core-ws-alloc (cwd)'),\n    ('7015f7d7a158', 'gluepay-events (cwd)'),\n    ('2b2293786574', 'gluepay-genskel (cwd)'),\n    ('939e8dc51427', 'gluepay-genskel-profiles (cwd)'),\n    ('608c92187fc2', 'gluepay-go (cwd)'),\n    ('1d9d5cd0fc7a', 'gluepay-kafka-proxy (cwd)'),\n    ('55beee9bb38d', 'hippocampus (cwd)'),\n    ('8d03a0034d28', 'pepi-eval-tasks (cwd)'),\n    ('1ce8cbeb3798', 'profiles2 (cwd)'),\n    ('73d9be7cf4f5', 'routing-service (cwd)'),\n    ('494e3eb7fdb0', 'routing-service-wt-auto-promote (cwd)'),\n    ('ea3954e908fd', 'salesforce-integration (cwd)'),\n    ('388bb2f2a2c7', 'schema (cwd)'),\n    ('e20637131d7f', 'sharing-pretty (cwd)'),\n    ('1ff29d668d37', 'workflows (cwd)'),\n    ('7cae04f2fb69', 'gkp-refresh (cwd)'),\n    ('bc16ed50d94a', 'pepi-eval-tasks (wt 5644)'),\n    ('879ae2bba2d0', 'pepi-eval-tasks (wt 58eb)'),\n    ('eee786b5a820', 'pepi-eval-tasks (wt 6106)'),\n    ('a24c01066757', 'pepi-eval-tasks (wt 91d8)'),\n    ('bb2301fda31d', 'pepi-eval-tasks (wt 9687)'),\n    ('f914736e8c14', 'pepi-eval-tasks (wt a4b6)'),\n    ('acca3a0273c1', 'pepi-eval-tasks (wt e380)'),\n    ('93cccb529197', 'avanza (cwd)')\n  ) AS legacy(h, n)\n), m AS (\n  SELECT id,\n    COALESCE(payload->>'type','(untyped)') AS mtype,\n    (payload->>'created_at')::timestamptz AS created_at,\n    CASE WHEN payload->>'decay_half_life_days' ~ '^[0-9]+(\\.[0-9]+)?$' AND (payload->>'decay_half_life_days')::float > 0\n         THEN (payload->>'decay_half_life_days')::float\n         ELSE CASE payload->>'type' WHEN 'decision' THEN 30 WHEN 'stable-fact' THEN 30 WHEN 'procedure' THEN 7 WHEN 'problem-fix' THEN 4 ELSE 30 END END AS hl,\n    (payload->>'ttl_expires_at')::timestamptz AS ttl,\n    split_part(payload->>'user_id', ':project:', 1) AS usr,\n    COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') AS prj\n  FROM public.mem0_memories WHERE payload->>'created_at' IS NOT NULL\n    AND split_part(payload->>'user_id', ':project:', 1) IN ($user)\n    AND COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') IN ($project)\n), r AS (\n  SELECT *, COALESCE((SELECT n FROM names WHERE h = prj LIMIT 1), 'unknown ' || prj) AS pname, EXTRACT(EPOCH FROM (now()-created_at))/86400 AS age,\n    0.5 ^ (GREATEST(0, EXTRACT(EPOCH FROM (now()-created_at))/86400) / hl) * CASE WHEN ttl IS NOT NULL AND now()>ttl THEN 0.25 ELSE 1 END AS recency\n  FROM m\n)\nSELECT usr AS \"user\", pname AS project, prj AS hash, count(*) AS memories,\n count(*) FILTER (WHERE mtype <> '(untyped)') AS typed,\n round(100.0*count(*) FILTER (WHERE mtype <> '(untyped)')/count(*),1) AS typed_pct,\n round(avg(recency)::numeric,3) AS avg_recency, round(percentile_cont(0.5) WITHIN GROUP (ORDER BY age)::numeric,1) AS median_age_days,\n count(*) FILTER (WHERE recency<0.05) AS decayed, count(*) FILTER (WHERE created_at>now()-interval '7 days') AS last_7d\nFROM r GROUP BY usr, pname, prj ORDER BY memories DESC"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Freshest memories (highest recency)",
+      "description": "**Read:** the 25 memories decay favours most right now, with type, half-life, age and text.\n\n**Look for:** what kind of memory wins the boost: if all are untyped and new, decay is only rewarding recency.\n\n**Example:** a memory aged 0 days has recency 1.000 and gets the full +0.05.",
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 24,
+        "h": 10
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mem0-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mem0-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH names AS (\n  SELECT DISTINCT substr(encode(sha256(convert_to(payload->>'project_id','UTF8')),'hex'),1,24) AS h,\n    replace(payload->>'project_id','git:github.com/','') AS n\n  FROM public.mem0_memories WHERE payload->>'project_id' IS NOT NULL\n  UNION ALL SELECT * FROM (VALUES\n    ('275394e48903', 'herdr:sr-diff (ws)'),\n    ('434891ed1789', 'herdr:sr-report (ws)'),\n    ('eb0814a5d17f', 'herdr:sr-tools (ws)'),\n    ('88bcb4fe2bd8', 'herdr:bump2 (ws)'),\n    ('755fe80ece18', 'herdr:gomk (ws)'),\n    ('97acf0a98fa4', 'herdr:guardport (ws)'),\n    ('2d94084b266e', 'herdr:integration (ws)'),\n    ('bcd3429f8a16', 'herdr:modci (ws)'),\n    ('448895a6d5ac', 'herdr:shimscopy (ws)'),\n    ('9e2b1868701e', 'herdr:integration (ws)'),\n    ('05278a599f07', 'herdr:w-code (ws)'),\n    ('fc700ecb4882', 'pi-agent (cwd)'),\n    ('923bcd4cf93d', 'allas (cwd)'),\n    ('555a4ffaff2f', 'cash-k8s-config (cwd)'),\n    ('0040bb1858da', 'coi (cwd)'),\n    ('9aa971732b6a', 'developer-center (cwd)'),\n    ('dae292795937', 'discovery-mapper (cwd)'),\n    ('00d792601d6e', 'gluepay-auditchain (cwd)'),\n    ('4eb5d5cbb791', 'gluepay-core (cwd)'),\n    ('4f10dad44950', 'gluepay-core-ws-alloc (cwd)'),\n    ('7015f7d7a158', 'gluepay-events (cwd)'),\n    ('2b2293786574', 'gluepay-genskel (cwd)'),\n    ('939e8dc51427', 'gluepay-genskel-profiles (cwd)'),\n    ('608c92187fc2', 'gluepay-go (cwd)'),\n    ('1d9d5cd0fc7a', 'gluepay-kafka-proxy (cwd)'),\n    ('55beee9bb38d', 'hippocampus (cwd)'),\n    ('8d03a0034d28', 'pepi-eval-tasks (cwd)'),\n    ('1ce8cbeb3798', 'profiles2 (cwd)'),\n    ('73d9be7cf4f5', 'routing-service (cwd)'),\n    ('494e3eb7fdb0', 'routing-service-wt-auto-promote (cwd)'),\n    ('ea3954e908fd', 'salesforce-integration (cwd)'),\n    ('388bb2f2a2c7', 'schema (cwd)'),\n    ('e20637131d7f', 'sharing-pretty (cwd)'),\n    ('1ff29d668d37', 'workflows (cwd)'),\n    ('7cae04f2fb69', 'gkp-refresh (cwd)'),\n    ('bc16ed50d94a', 'pepi-eval-tasks (wt 5644)'),\n    ('879ae2bba2d0', 'pepi-eval-tasks (wt 58eb)'),\n    ('eee786b5a820', 'pepi-eval-tasks (wt 6106)'),\n    ('a24c01066757', 'pepi-eval-tasks (wt 91d8)'),\n    ('bb2301fda31d', 'pepi-eval-tasks (wt 9687)'),\n    ('f914736e8c14', 'pepi-eval-tasks (wt a4b6)'),\n    ('acca3a0273c1', 'pepi-eval-tasks (wt e380)'),\n    ('93cccb529197', 'avanza (cwd)')\n  ) AS legacy(h, n)\n), m AS (\n  SELECT id,\n    COALESCE(payload->>'type','(untyped)') AS mtype,\n    (payload->>'created_at')::timestamptz AS created_at,\n    CASE WHEN payload->>'decay_half_life_days' ~ '^[0-9]+(\\.[0-9]+)?$' AND (payload->>'decay_half_life_days')::float > 0\n         THEN (payload->>'decay_half_life_days')::float\n         ELSE CASE payload->>'type' WHEN 'decision' THEN 30 WHEN 'stable-fact' THEN 30 WHEN 'procedure' THEN 7 WHEN 'problem-fix' THEN 4 ELSE 30 END END AS hl,\n    (payload->>'ttl_expires_at')::timestamptz AS ttl,\n    split_part(payload->>'user_id', ':project:', 1) AS usr,\n    COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') AS prj\n  FROM public.mem0_memories WHERE payload->>'created_at' IS NOT NULL\n    AND split_part(payload->>'user_id', ':project:', 1) IN ($user)\n    AND COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') IN ($project)\n), r AS (\n  SELECT *, COALESCE((SELECT n FROM names WHERE h = prj LIMIT 1), 'unknown ' || prj) AS pname, EXTRACT(EPOCH FROM (now()-created_at))/86400 AS age,\n    0.5 ^ (GREATEST(0, EXTRACT(EPOCH FROM (now()-created_at))/86400) / hl) * CASE WHEN ttl IS NOT NULL AND now()>ttl THEN 0.25 ELSE 1 END AS recency\n  FROM m\n)\nSELECT r.id::text AS memory_id, mtype AS type, hl AS half_life_days, round(age::numeric,1) AS age_days, round(recency::numeric,3) AS recency,\n left(regexp_replace(mm.payload->>'data','\\s+',' ','g'),120) AS memory\nFROM r JOIN public.mem0_memories mm USING (id) ORDER BY recency DESC LIMIT 25"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "barchart",
+      "title": "Recency buckets by project",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mem0-pg"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 10
+      },
+      "description": "How each project's memories sit on the decay curve right now.\n\n**Read:** one bar per project hash, split by recency bucket (left of the legend = decayed, right = fresh).\n\n**Look for:** a bar that is mostly `<0.05` is an old project whose memories no longer get a recency boost; mostly `>=0.5` means recent capture activity.\n\n**Example:** project `1d9d5cd0fc7a` mostly `<0.05` vs `fc700ecb4882` mostly `0.5+`.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mem0-pg"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH names AS (\n  SELECT DISTINCT substr(encode(sha256(convert_to(payload->>'project_id','UTF8')),'hex'),1,24) AS h,\n    replace(payload->>'project_id','git:github.com/','') AS n\n  FROM public.mem0_memories WHERE payload->>'project_id' IS NOT NULL\n  UNION ALL SELECT * FROM (VALUES\n    ('275394e48903', 'herdr:sr-diff (ws)'),\n    ('434891ed1789', 'herdr:sr-report (ws)'),\n    ('eb0814a5d17f', 'herdr:sr-tools (ws)'),\n    ('88bcb4fe2bd8', 'herdr:bump2 (ws)'),\n    ('755fe80ece18', 'herdr:gomk (ws)'),\n    ('97acf0a98fa4', 'herdr:guardport (ws)'),\n    ('2d94084b266e', 'herdr:integration (ws)'),\n    ('bcd3429f8a16', 'herdr:modci (ws)'),\n    ('448895a6d5ac', 'herdr:shimscopy (ws)'),\n    ('9e2b1868701e', 'herdr:integration (ws)'),\n    ('05278a599f07', 'herdr:w-code (ws)'),\n    ('fc700ecb4882', 'pi-agent (cwd)'),\n    ('923bcd4cf93d', 'allas (cwd)'),\n    ('555a4ffaff2f', 'cash-k8s-config (cwd)'),\n    ('0040bb1858da', 'coi (cwd)'),\n    ('9aa971732b6a', 'developer-center (cwd)'),\n    ('dae292795937', 'discovery-mapper (cwd)'),\n    ('00d792601d6e', 'gluepay-auditchain (cwd)'),\n    ('4eb5d5cbb791', 'gluepay-core (cwd)'),\n    ('4f10dad44950', 'gluepay-core-ws-alloc (cwd)'),\n    ('7015f7d7a158', 'gluepay-events (cwd)'),\n    ('2b2293786574', 'gluepay-genskel (cwd)'),\n    ('939e8dc51427', 'gluepay-genskel-profiles (cwd)'),\n    ('608c92187fc2', 'gluepay-go (cwd)'),\n    ('1d9d5cd0fc7a', 'gluepay-kafka-proxy (cwd)'),\n    ('55beee9bb38d', 'hippocampus (cwd)'),\n    ('8d03a0034d28', 'pepi-eval-tasks (cwd)'),\n    ('1ce8cbeb3798', 'profiles2 (cwd)'),\n    ('73d9be7cf4f5', 'routing-service (cwd)'),\n    ('494e3eb7fdb0', 'routing-service-wt-auto-promote (cwd)'),\n    ('ea3954e908fd', 'salesforce-integration (cwd)'),\n    ('388bb2f2a2c7', 'schema (cwd)'),\n    ('e20637131d7f', 'sharing-pretty (cwd)'),\n    ('1ff29d668d37', 'workflows (cwd)'),\n    ('7cae04f2fb69', 'gkp-refresh (cwd)'),\n    ('bc16ed50d94a', 'pepi-eval-tasks (wt 5644)'),\n    ('879ae2bba2d0', 'pepi-eval-tasks (wt 58eb)'),\n    ('eee786b5a820', 'pepi-eval-tasks (wt 6106)'),\n    ('a24c01066757', 'pepi-eval-tasks (wt 91d8)'),\n    ('bb2301fda31d', 'pepi-eval-tasks (wt 9687)'),\n    ('f914736e8c14', 'pepi-eval-tasks (wt a4b6)'),\n    ('acca3a0273c1', 'pepi-eval-tasks (wt e380)'),\n    ('93cccb529197', 'avanza (cwd)')\n  ) AS legacy(h, n)\n), m AS (\n  SELECT id,\n    COALESCE(payload->>'type','(untyped)') AS mtype,\n    (payload->>'created_at')::timestamptz AS created_at,\n    CASE WHEN payload->>'decay_half_life_days' ~ '^[0-9]+(\\.[0-9]+)?$' AND (payload->>'decay_half_life_days')::float > 0\n         THEN (payload->>'decay_half_life_days')::float\n         ELSE CASE payload->>'type' WHEN 'decision' THEN 30 WHEN 'stable-fact' THEN 30 WHEN 'procedure' THEN 7 WHEN 'problem-fix' THEN 4 ELSE 30 END END AS hl,\n    (payload->>'ttl_expires_at')::timestamptz AS ttl,\n    split_part(payload->>'user_id', ':project:', 1) AS usr,\n    COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') AS prj\n  FROM public.mem0_memories WHERE payload->>'created_at' IS NOT NULL\n    AND split_part(payload->>'user_id', ':project:', 1) IN ($user)\n    AND COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') IN ($project)\n), r AS (\n  SELECT *, COALESCE((SELECT n FROM names WHERE h = prj LIMIT 1), 'unknown ' || prj) AS pname, EXTRACT(EPOCH FROM (now()-created_at))/86400 AS age,\n    0.5 ^ (GREATEST(0, EXTRACT(EPOCH FROM (now()-created_at))/86400) / hl) * CASE WHEN ttl IS NOT NULL AND now()>ttl THEN 0.25 ELSE 1 END AS recency\n  FROM m\n)\nSELECT pname AS project,\n count(*) FILTER (WHERE recency<0.05) AS \"<0.05\",\n count(*) FILTER (WHERE recency>=0.05 AND recency<0.25) AS \"0.05-0.25\",\n count(*) FILTER (WHERE recency>=0.25 AND recency<0.5) AS \"0.25-0.5\",\n count(*) FILTER (WHERE recency>=0.5 AND recency<0.75) AS \"0.5-0.75\",\n count(*) FILTER (WHERE recency>=0.75) AS \">=0.75\"\nFROM r GROUP BY pname ORDER BY count(*) DESC LIMIT 15"
+        }
+      ],
+      "options": {
+        "xField": "project",
+        "stacking": "normal",
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Memories created per day by project",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "mem0-pg"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 10
+      },
+      "description": "Capture activity over time, per project. Follows the dashboard time range.\n\n**Read:** each stacked bar is one day; colours are projects (hash from `user_id`).\n\n**Look for:** a project that stops growing (capture stopped or the project went idle) and sudden spikes (a bulk import or a looping agent).\n\n**Example:** 166 memories created in the last 24 hours, spread over a few active projects.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "mem0-pg"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "WITH names AS (\n  SELECT DISTINCT substr(encode(sha256(convert_to(payload->>'project_id','UTF8')),'hex'),1,24) AS h,\n    replace(payload->>'project_id','git:github.com/','') AS n\n  FROM public.mem0_memories WHERE payload->>'project_id' IS NOT NULL\n  UNION ALL SELECT * FROM (VALUES\n    ('275394e48903', 'herdr:sr-diff (ws)'),\n    ('434891ed1789', 'herdr:sr-report (ws)'),\n    ('eb0814a5d17f', 'herdr:sr-tools (ws)'),\n    ('88bcb4fe2bd8', 'herdr:bump2 (ws)'),\n    ('755fe80ece18', 'herdr:gomk (ws)'),\n    ('97acf0a98fa4', 'herdr:guardport (ws)'),\n    ('2d94084b266e', 'herdr:integration (ws)'),\n    ('bcd3429f8a16', 'herdr:modci (ws)'),\n    ('448895a6d5ac', 'herdr:shimscopy (ws)'),\n    ('9e2b1868701e', 'herdr:integration (ws)'),\n    ('05278a599f07', 'herdr:w-code (ws)'),\n    ('fc700ecb4882', 'pi-agent (cwd)'),\n    ('923bcd4cf93d', 'allas (cwd)'),\n    ('555a4ffaff2f', 'cash-k8s-config (cwd)'),\n    ('0040bb1858da', 'coi (cwd)'),\n    ('9aa971732b6a', 'developer-center (cwd)'),\n    ('dae292795937', 'discovery-mapper (cwd)'),\n    ('00d792601d6e', 'gluepay-auditchain (cwd)'),\n    ('4eb5d5cbb791', 'gluepay-core (cwd)'),\n    ('4f10dad44950', 'gluepay-core-ws-alloc (cwd)'),\n    ('7015f7d7a158', 'gluepay-events (cwd)'),\n    ('2b2293786574', 'gluepay-genskel (cwd)'),\n    ('939e8dc51427', 'gluepay-genskel-profiles (cwd)'),\n    ('608c92187fc2', 'gluepay-go (cwd)'),\n    ('1d9d5cd0fc7a', 'gluepay-kafka-proxy (cwd)'),\n    ('55beee9bb38d', 'hippocampus (cwd)'),\n    ('8d03a0034d28', 'pepi-eval-tasks (cwd)'),\n    ('1ce8cbeb3798', 'profiles2 (cwd)'),\n    ('73d9be7cf4f5', 'routing-service (cwd)'),\n    ('494e3eb7fdb0', 'routing-service-wt-auto-promote (cwd)'),\n    ('ea3954e908fd', 'salesforce-integration (cwd)'),\n    ('388bb2f2a2c7', 'schema (cwd)'),\n    ('e20637131d7f', 'sharing-pretty (cwd)'),\n    ('1ff29d668d37', 'workflows (cwd)'),\n    ('7cae04f2fb69', 'gkp-refresh (cwd)'),\n    ('bc16ed50d94a', 'pepi-eval-tasks (wt 5644)'),\n    ('879ae2bba2d0', 'pepi-eval-tasks (wt 58eb)'),\n    ('eee786b5a820', 'pepi-eval-tasks (wt 6106)'),\n    ('a24c01066757', 'pepi-eval-tasks (wt 91d8)'),\n    ('bb2301fda31d', 'pepi-eval-tasks (wt 9687)'),\n    ('f914736e8c14', 'pepi-eval-tasks (wt a4b6)'),\n    ('acca3a0273c1', 'pepi-eval-tasks (wt e380)'),\n    ('93cccb529197', 'avanza (cwd)')\n  ) AS legacy(h, n)\n), m AS (\n  SELECT id,\n    COALESCE(payload->>'type','(untyped)') AS mtype,\n    (payload->>'created_at')::timestamptz AS created_at,\n    CASE WHEN payload->>'decay_half_life_days' ~ '^[0-9]+(\\.[0-9]+)?$' AND (payload->>'decay_half_life_days')::float > 0\n         THEN (payload->>'decay_half_life_days')::float\n         ELSE CASE payload->>'type' WHEN 'decision' THEN 30 WHEN 'stable-fact' THEN 30 WHEN 'procedure' THEN 7 WHEN 'problem-fix' THEN 4 ELSE 30 END END AS hl,\n    (payload->>'ttl_expires_at')::timestamptz AS ttl,\n    split_part(payload->>'user_id', ':project:', 1) AS usr,\n    COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') AS prj\n  FROM public.mem0_memories WHERE payload->>'created_at' IS NOT NULL\n    AND split_part(payload->>'user_id', ':project:', 1) IN ($user)\n    AND COALESCE(substring(payload->>'user_id' from ':project:(.*)$'), '(none)') IN ($project)\n), r AS (\n  SELECT *, COALESCE((SELECT n FROM names WHERE h = prj LIMIT 1), 'unknown ' || prj) AS pname, EXTRACT(EPOCH FROM (now()-created_at))/86400 AS age,\n    0.5 ^ (GREATEST(0, EXTRACT(EPOCH FROM (now()-created_at))/86400) / hl) * CASE WHEN ttl IS NOT NULL AND now()>ttl THEN 0.25 ELSE 1 END AS recency\n  FROM m\n)\nSELECT date_trunc('day', created_at) AS time, pname AS metric, count(*) AS value\nFROM r WHERE $__timeFilter(created_at) GROUP BY 1,2 ORDER BY 1"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": true,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

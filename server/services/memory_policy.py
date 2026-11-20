@@ -5,7 +5,11 @@ Callers that have already selected canonical memory text can bypass extraction
 with ``infer=False``. Retrieval eligibility is enforced separately.
 """
 
-MEMORY_POLICY_VERSION = "hippocampus-durable-memory-v1"
+MEMORY_POLICY_VERSION = "hippocampus-durable-memory-v2"
+
+# Labels the extractor may attach to each memory as its "type" field. They match
+# the half-life keys in HeuristicReranker; any other value is dropped.
+EXTRACTED_MEMORY_TYPES = frozenset({"decision", "stable-fact", "procedure", "problem-fix"})
 
 DEFAULT_MEMORY_INSTRUCTIONS = f"""Hippocampus durable memory policy ({MEMORY_POLICY_VERSION})
 
@@ -27,6 +31,15 @@ Keep these kinds of supported knowledge:
   verification. Do not turn an unexecuted plan into a proven procedure.
 - Explicit corrections to earlier knowledge: preserve what was corrected and
   the new supported statement. Do not invent a correction from mere similarity.
+
+Label every memory you return with a "type" field next to its "text", set to
+exactly one of these values:
+- "decision" for an accepted decision.
+- "problem-fix" for confirmed problem-fix knowledge.
+- "stable-fact" for a stable fact.
+- "procedure" for a reusable procedure.
+A correction takes the type of the knowledge it corrects. Keep every other
+field of the required response schema unchanged.
 
 Skip speculation, unresolved hypotheses, generic explanations, assistant
 narration, temporary task progress, pending actions, repeated information with

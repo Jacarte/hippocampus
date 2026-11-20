@@ -96,6 +96,8 @@ Fallback (manual, same SQL): `./monitoring/postgres/create-grafana-ro.sh` (uses 
 | One memory is returned all the time | Hot Memories: *Top memories by hits*, *Hot memories over time* | Read the `memory` column (current text); check it is accurate and current; outdated + hot is the most harmful case. Edit it in the CMS by `memory_id`. |
 | Good memories are ranked low | *Memory hits by rank* (rank 11+ high) | Compare with the Retrieval Pipeline dashboard (rerank); consider narrower queries or filters. |
 | Few distinct memories ever hit | *Distinct memories hit* vs memory count in CMS | Review never-hit memories for cleanup or rewording. |
+| Recall seems to prefer only recent memories | Decay: *Memories by recency bucket and type*, *Using fallback 30d half-life* | Most memories untyped = they all use the 30-day fallback; check that new captures get a `type`. |
+| One project's memories are fading or growing oddly | Decay: *Age and recency by user and project*, *Recency buckets by project*, *Memories created per day by project* | Filter with the **user** / **project** variables; low `last_7d` and high `decayed` = idle project; a spike in the per-day chart = bulk import or looping agent. Queries run on Postgres (`mem0-pg`), so they show the corpus, not what `/retrieve` returned. |
 
 ## LogQL per panel
 

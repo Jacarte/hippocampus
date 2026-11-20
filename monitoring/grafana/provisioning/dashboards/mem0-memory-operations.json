@@ -1,7 +1,7 @@
 {
   "title": "Mem0 — Memory Operations",
   "uid": "mem0-memory-operations",
-  "version": 1,
+  "version": 3,
   "schemaVersion": 39,
   "refresh": "10s",
   "time": {
@@ -128,7 +128,7 @@
           "refId": "A"
         }
       ],
-      "description": "Operations per second by operation, user_id and agent_id. Use it to spot bursts."
+      "description": "Operations per second by operation, user_id and agent_id. Use it to spot bursts.\n\n**Read:** operations per second (add, search, update, delete...).\n\n**Look for:** bursts and unexpected operations.\n\n**Example:** a spike of `add` with no `search` = capture running without recall."
     },
     {
       "id": 3,
@@ -172,7 +172,7 @@
           "refId": "A"
         }
       ],
-      "description": "Total operations since the server started, per operation."
+      "description": "Total operations since the server started, per operation.\n\n**Read:** running total since the server started, per operation.\n\n**Look for:** the ratio search : add.\n\n**Example:** resets to 0 after a server restart; it is not a bug."
     },
     {
       "collapsed": false,
@@ -233,7 +233,7 @@
           "refId": "A"
         }
       ],
-      "description": "Failed operations per second by operation."
+      "description": "Failed operations per second by operation.\n\n**Read:** failed operations per second.\n\n**Look for:** any sustained line.\n\n**Example:** `add` errors rising after a deploy = check the LLM/embedding provider key in the server logs."
     },
     {
       "id": 6,
@@ -283,7 +283,7 @@
           "refId": "A"
         }
       ],
-      "description": "Failures divided by calls. Sustained values above ~0.01 deserve a look at the server logs for that operation."
+      "description": "Failures divided by calls. Sustained values above ~0.01 deserve a look at the server logs for that operation.\n\n**Read:** failures divided by calls per operation.\n\n**Look for:** sustained values above ~0.01.\n\n**Example:** 0.5 on `update` = half of the edits fail."
     },
     {
       "id": 7,
@@ -330,7 +330,7 @@
           "refId": "A"
         }
       ],
-      "description": "Search/retrieve calls with at least one result divided by all such calls. Counts calls, not result quality."
+      "description": "Search/retrieve calls with at least one result divided by all such calls. Counts calls, not result quality.\n\n**Read:** share of search/retrieve calls that returned at least one result.\n\n**Look for:** a drop = more empty answers; see Query Misses for which queries.\n\n**Example:** 0.9 -> 0.6 after switching a project's scope."
     },
     {
       "id": 8,
@@ -380,7 +380,7 @@
           "refId": "B"
         }
       ],
-      "description": "Search/retrieve calls per second: all calls versus calls that returned results. The gap is the number of empty answers."
+      "description": "Search/retrieve calls per second: all calls versus calls that returned results. The gap is the number of empty answers.\n\n**Read:** all search/retrieve calls vs those with results; the gap is empty answers.\n\n**Look for:** the two lines diverging.\n\n**Example:** total 2/s vs hits 1/s = half of calls return nothing."
     },
     {
       "collapsed": false,
@@ -450,7 +450,7 @@
           }
         }
       ],
-      "description": "The 10 busiest operation + user_id pairs. In pi, user_id ends with the project hash, so this is the busiest projects."
+      "description": "The 10 busiest operation + user_id pairs. In pi, user_id ends with the project hash, so this is the busiest projects.\n\n**Read:** busiest operation + user_id pairs; user_id ends with the project hash.\n\n**Look for:** which project generates most traffic.\n\n**Example:** one project with 10x the `search` rate of the others is a looping agent or heavy user."
     }
   ]
 }

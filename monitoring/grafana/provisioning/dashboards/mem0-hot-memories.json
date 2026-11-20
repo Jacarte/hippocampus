@@ -1,7 +1,7 @@
 {
   "title": "Mem0 — Hot Memories",
   "uid": "mem0-hot-memories",
-  "version": 1,
+  "version": 3,
   "schemaVersion": 39,
   "refresh": "1m",
   "editable": true,
@@ -223,7 +223,7 @@
       "id": 4,
       "type": "stat",
       "title": "Memory hits",
-      "description": "Total memory_hit events (one per returned memory) in the selected time range and filters. Compare with 'Query events' on the Query Misses dashboard to see the average number of memories returned per query.",
+      "description": "Total memory_hit events (one per returned memory) in the selected time range and filters. Compare with 'Query events' on the Query Misses dashboard to see the average number of memories returned per query.\n\n**Read:** total times memories were returned (one hit per returned memory) in the range.\n\n**Look for:** 0 = no search traffic (CMS browsing does not count).\n\n**Example:** 20 hits from one agent session in an hour.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -276,7 +276,7 @@
       "id": 5,
       "type": "stat",
       "title": "Distinct memories hit",
-      "description": "Number of different memory IDs that were returned at least once in the selected time range. Low value relative to the memory count (see CMS) = most stored memories are never retrieved.",
+      "description": "Number of different memory IDs that were returned at least once in the selected time range. Low value relative to the memory count (see CMS) = most stored memories are never retrieved.\n\n**Read:** how many different memories were returned at least once.\n\n**Look for:** low vs total memories = most memories are never retrieved.\n\n**Example:** 120 hits over only 8 distinct memories = the same few memories answer everything.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -329,7 +329,7 @@
       "id": 6,
       "type": "heatmap",
       "title": "Hot memories over time (top 20)",
-      "description": "Each row is a memory_id, each column a time bucket; colour = number of times it was returned in that bucket. Read: a row that stays dark is a persistently hot memory; a single dark cell is a burst (e.g. one agent run looping). Why a heatmap fed by a Loki metric query: topk(20, sum by (memory_id) (count_over_time(...))) returns one time series per memory_id, and the Heatmap panel renders pre-bucketed series as rows (calculate=false) with the memory_id as the row label, which stays readable for 20 rows where a line chart would be spaghetti. topk is evaluated per time bucket, so the set of rows can exceed 20 over a long range (an id can enter the top 20 in one bucket only). Rows show memory_id only: Grafana 11.3 has no per-series lookup that could rename heatmap rows from a Postgres query, so the memory text is in the 'Top memories by hits' table below (same memory_id). Action: verify hot memories are correct and current.",
+      "description": "Each row is a memory_id, each column a time bucket; colour = number of times it was returned in that bucket. Read: a row that stays dark is a persistently hot memory; a single dark cell is a burst (e.g. one agent run looping). Why a heatmap fed by a Loki metric query: topk(20, sum by (memory_id) (count_over_time(...))) returns one time series per memory_id, and the Heatmap panel renders pre-bucketed series as rows (calculate=false) with the memory_id as the row label, which stays readable for 20 rows where a line chart would be spaghetti. topk is evaluated per time bucket, so the set of rows can exceed 20 over a long range (an id can enter the top 20 in one bucket only). Rows show memory_id only: Grafana 11.3 has no per-series lookup that could rename heatmap rows from a Postgres query, so the memory text is in the 'Top memories by hits' table below (same memory_id). Action: verify hot memories are correct and current.\n\n**Read:** rows are memory ids, columns are time, colour is hits per bucket.\n\n**Look for:** a row dark all the time = persistently hot memory; a single dark cell = a burst (one looping run).\n\n**Example:** the same row lit every hour is a candidate to promote to a global/pinned memory.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -423,7 +423,7 @@
       "id": 8,
       "type": "table",
       "title": "Top memories by hits",
-      "description": "Top 20 memory IDs by number of times returned over the whole selected time range (instant Loki query over $__range), with the current memory text (first 100 chars) read live from Postgres. Read: 'Hits' = how many times the memory was returned; 'memory' = what it says now. Action: review the top entries for accuracy and staleness; open the memory_id in the CMS to edit it. How: query A (Loki) counts hits per memory_id, query B (Postgres, read-only role grafana_ro) lists id + text; the Merge transformation combines rows with the same memory_id (memory_id is the only field both queries share, so this is an outer join), then 'Filter data by values' drops rows without hits. Empty memory = deleted from Postgres, or beyond the 20000-row cap of query B. No memory column + error icon = query B failed (role grafana_ro missing or Postgres down).",
+      "description": "Top 20 memory IDs by number of times returned over the whole selected time range (instant Loki query over $__range), with the current memory text (first 100 chars) read live from Postgres. Read: 'Hits' = how many times the memory was returned; 'memory' = what it says now. Action: review the top entries for accuracy and staleness; open the memory_id in the CMS to edit it. How: query A (Loki) counts hits per memory_id, query B (Postgres, read-only role grafana_ro) lists id + text; the Merge transformation combines rows with the same memory_id (memory_id is the only field both queries share, so this is an outer join), then 'Filter data by values' drops rows without hits. Empty memory = deleted from Postgres, or beyond the 20000-row cap of query B. No memory column + error icon = query B failed (role grafana_ro missing or Postgres down).\n\n**Read:** top 20 memories by hits with their text. Hits = times returned in the range.\n\n**Look for:** generic or outdated text at the top (it crowds out better ones).\n\n**Example:** a stale decision with 40 hits: edit or delete it in the CMS.",
       "datasource": {
         "type": "datasource",
         "uid": "-- Mixed --"
@@ -573,7 +573,7 @@
       "id": 9,
       "type": "timeseries",
       "title": "Memory hits by rank",
-      "description": "Number of memory hits per time bucket, grouped by the rank at which the memory was returned (rank 1 = best match). Read: a healthy system returns most of its hits at ranks 1-3. If hits pile up at rank 11+ the ranking/rerank stage is not surfacing useful memories early, or queries are very broad. Action: compare with the Retrieval Pipeline dashboard (rerank stage) and the Query Misses dashboard.",
+      "description": "Number of memory hits per time bucket, grouped by the rank at which the memory was returned (rank 1 = best match). Read: a healthy system returns most of its hits at ranks 1-3. If hits pile up at rank 11+ the ranking/rerank stage is not surfacing useful memories early, or queries are very broad. Action: compare with the Retrieval Pipeline dashboard (rerank stage) and the Query Misses dashboard.\n\n**Read:** hits per time bucket, split by the rank the memory had (1 = best).\n\n**Look for:** hits piling at rank 11+ means rank 1-3 results are rarely the useful ones.\n\n**Example:** mostly rank 1-3 = healthy ranking.",
       "datasource": {
         "type": "loki",
         "uid": "loki"

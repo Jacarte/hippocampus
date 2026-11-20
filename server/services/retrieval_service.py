@@ -1091,6 +1091,11 @@ class RetrievalService:
         combined_filters = dict(filters or {})
         if "scope" not in combined_filters:
             combined_filters["scope"] = list(scopes) if len(scopes) > 1 else scopes[0]
+        elif combined_filters["scope"] is None:
+            # Explicit ``scope: null`` opts out of scope filtering. Dropping the
+            # key (instead of forwarding None to mem0) keeps the semantic stage
+            # working for memories that carry no ``scope`` metadata.
+            del combined_filters["scope"]
         return combined_filters or None
 
     def _strip_retrieve_control_filters(
@@ -1419,7 +1424,7 @@ class HeuristicReranker:
         "procedure": 7.0,
         "problem-fix": 4.0,
     }
-    _FALLBACK_HALF_LIFE_DAYS = 4.0
+    _FALLBACK_HALF_LIFE_DAYS = 30.0
     # Recency used when a candidate has no parseable ``created_at``: neutral,
     # so an undated memory is neither promoted nor buried.
     _NEUTRAL_RECENCY = 0.5

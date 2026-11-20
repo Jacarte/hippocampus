@@ -1,7 +1,7 @@
 {
   "title": "Mem0 — Retrieval Pipeline",
   "uid": "mem0-retrieval-pipeline",
-  "version": 1,
+  "version": 3,
   "schemaVersion": 39,
   "refresh": "10s",
   "time": {
@@ -128,7 +128,7 @@
           "refId": "A"
         }
       ],
-      "description": "Average seconds per stage: lexical, semantic, rerank, total."
+      "description": "Average seconds per stage: lexical, semantic, rerank, total.\n\n**Read:** average seconds per stage: lexical, semantic, rerank, total.\n\n**Look for:** which stage dominates `total`.\n\n**Example:** semantic 1.2s of 1.5s total = the embedding call is the cost."
     },
     {
       "id": 3,
@@ -173,7 +173,7 @@
           "refId": "A"
         }
       ],
-      "description": "Slowest 1% per stage. The stage whose p99 grows is the bottleneck."
+      "description": "Slowest 1% per stage. The stage whose p99 grows is the bottleneck.\n\n**Read:** slowest 1% per stage.\n\n**Look for:** the stage whose p99 grows is the bottleneck.\n\n**Example:** rerank p99 at 10s while avg is 0.3s = occasional timeouts."
     },
     {
       "collapsed": false,
@@ -234,7 +234,7 @@
           "refId": "A"
         }
       ],
-      "description": "Times per second a stage was unavailable, by stage and reason. Above zero means answers came from a reduced pipeline."
+      "description": "Times per second a stage was unavailable, by stage and reason. Above zero means answers came from a reduced pipeline.\n\n**Read:** how often a stage was unavailable, by stage and reason.\n\n**Look for:** anything above zero = answers from a reduced pipeline.\n\n**Example:** `semantic` / `embedding_error` after an API key expiry."
     },
     {
       "id": 6,
@@ -279,7 +279,7 @@
           "refId": "A"
         }
       ],
-      "description": "Average number of candidates each stage returned. lexical near 0 with healthy semantic = keyword coverage gap."
+      "description": "Average number of candidates each stage returned. lexical near 0 with healthy semantic = keyword coverage gap.\n\n**Read:** average candidates each stage returned.\n\n**Look for:** lexical near 0 with healthy semantic = keyword coverage gap.\n\n**Example:** semantic 20, lexical 0 = queries use words not in memory text."
     },
     {
       "collapsed": false,
@@ -337,7 +337,7 @@
           "refId": "A"
         }
       ],
-      "description": "Average latency of the /query endpoint only."
+      "description": "Average latency of the /query endpoint only.\n\n**Read:** average latency of the `/query` endpoint only.\n\n**Look for:** growth over time.\n\n**Example:** 0.2s -> 1s as the store grows."
     },
     {
       "id": 9,
@@ -382,7 +382,7 @@
           "refId": "A"
         }
       ],
-      "description": "Average number of results per /query call."
+      "description": "Average number of results per /query call.\n\n**Read:** average results per `/query` call.\n\n**Look for:** values near 0.\n\n**Example:** 0.3 = most `/query` calls are empty."
     }
   ]
 }

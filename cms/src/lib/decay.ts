@@ -5,7 +5,7 @@ export function deriveHalfLifeDays(type: string): number {
   if (type === 'decision' || type === 'stable-fact') return 30
   if (type === 'procedure') return 7
   if (type === 'problem-fix') return 4
-  return 4
+  return 30
 }
 
 /**
